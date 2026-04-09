@@ -32,7 +32,7 @@ class MnemoClient:
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api.mnemoverse.com",
+        base_url: str = "https://core.mnemoverse.com",
         timeout: float = 10.0,
         max_retries: int = 3,
     ) -> None:

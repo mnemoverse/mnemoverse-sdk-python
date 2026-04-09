@@ -23,7 +23,7 @@ from mnemoverse.types import (
     WriteResponse,
 )
 
-_DEFAULT_BASE_URL = "https://api.mnemoverse.com"
+_DEFAULT_BASE_URL = "https://core.mnemoverse.com"
 
 
 class AsyncMnemoClient:
