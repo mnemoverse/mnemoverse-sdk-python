@@ -1,6 +1,11 @@
+[![PyPI version](https://img.shields.io/pypi/v/mnemoverse.svg?color=blue)](https://pypi.org/project/mnemoverse/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mnemoverse.svg)](https://pypi.org/project/mnemoverse/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Research: SLoD arXiv](https://img.shields.io/badge/Research-arXiv%3A2603.08965-b31b1b)](https://arxiv.org/abs/2603.08965)
+
 # Mnemoverse Python SDK
 
-Persistent memory for AI agents. Not vector search — statistical learning.
+Persistent memory for AI agents. Not vector search — statistical learning backed by [Hebbian associations](https://arxiv.org/abs/2603.08965).
 
 ## Installation
 
