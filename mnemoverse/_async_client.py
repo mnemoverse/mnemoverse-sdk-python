@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -18,12 +19,23 @@ from mnemoverse.types import (
     FeedbackResponse,
     HealthResponse,
     ReadResponse,
+    RecentResponse,
     StatsResponse,
     WriteBatchResponse,
     WriteResponse,
 )
 
 _DEFAULT_BASE_URL = "https://core.mnemoverse.com"
+
+
+def _isoformat(value: datetime | str) -> str:
+    """Accept either a datetime or an already-formatted string.
+
+    Callers reach for both: a datetime when they computed the boundary, a string
+    when they are echoing a watermark the server gave them. Rejecting the string
+    form would make round-tripping a cursor-adjacent value needlessly awkward.
+    """
+    return value.isoformat() if isinstance(value, datetime) else value
 
 
 class AsyncMnemoClient:
@@ -111,8 +123,23 @@ class AsyncMnemoClient:
         min_relevance: float = 0.3,
         include_associations: bool = True,
         concepts: list[str] | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+        order_by: str | None = None,
+        exclude_author: str | None = None,
     ) -> ReadResponse:
-        """Query memory with semantic search + Hebbian expansion."""
+        """Query memory with semantic search + Hebbian expansion.
+
+        ``since`` / ``until`` bound the result by creation time, inclusive at
+        both ends; naive datetimes are read as UTC. ``order_by="recency"``
+        re-sorts the matched set newest-first without changing which entries
+        matched. ``exclude_author`` drops one author principal — the
+        "everyone but me" read in a shared room.
+
+        For "what happened lately" rather than "what do I know about X", use
+        :meth:`recent`: search returns what MATCHES, so entries that exist but
+        do not match are absent — correctly, but invisibly.
+        """
         body: dict[str, Any] = {
             "query": query,
             "top_k": top_k,
@@ -123,8 +150,51 @@ class AsyncMnemoClient:
             body["domain"] = domain
         if concepts:
             body["concepts"] = concepts
+        if since is not None:
+            body["since"] = _isoformat(since)
+        if until is not None:
+            body["until"] = _isoformat(until)
+        if order_by is not None:
+            body["order_by"] = order_by
+        if exclude_author is not None:
+            body["exclude_author"] = exclude_author
         data = await self._request("POST", "/api/v1/memory/read", json=body)
         return ReadResponse.model_validate(data)
+
+    async def recent(
+        self,
+        *,
+        domain: str | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+        exclude_author: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> RecentResponse:
+        """List the newest entries first — no query, complete by construction.
+
+        The temporal complement of :meth:`read`. Nothing is ranked away, so this
+        is what to use when you need to be sure you are seeing everything:
+        resuming after a break, catching up on a shared room, or auditing.
+
+        Paged by cursor rather than truncated. When more entries exist the
+        response carries ``next_cursor``; passing it back continues the listing
+        with no skips and no duplicates even while writes are landing, which
+        LIMIT/OFFSET cannot guarantee. An empty feed is a normal empty list.
+        """
+        body: dict[str, Any] = {"limit": limit}
+        if domain:
+            body["domain"] = domain
+        if since is not None:
+            body["since"] = _isoformat(since)
+        if until is not None:
+            body["until"] = _isoformat(until)
+        if exclude_author is not None:
+            body["exclude_author"] = exclude_author
+        if cursor:
+            body["cursor"] = cursor
+        data = await self._request("POST", "/api/v1/memory/recent", json=body)
+        return RecentResponse.model_validate(data)
 
     async def feedback(
         self,

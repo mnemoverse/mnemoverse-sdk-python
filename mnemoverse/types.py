@@ -5,6 +5,7 @@ Source of truth: mnemoverse-core/src/mnemo/api/schemas.py
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -38,6 +39,20 @@ class WriteBatchResponse(BaseModel):
 # --- Read ---
 
 
+class Provenance(BaseModel):
+    """Who recorded a memory, when the server was told.
+
+    Omitted entirely for entries written before provenance existed, which is why
+    every field is optional and the whole object is nullable on an item.
+    """
+
+    principal: str | None = None
+    agent: str | None = None
+    agent_name: str | None = None
+    client_env: str | None = None
+    is_external: bool | None = None
+
+
 class MemoryItem(BaseModel):
     atom_id: UUID
     content: str
@@ -49,6 +64,31 @@ class MemoryItem(BaseModel):
     concepts: list[str]
     domain: str
     metadata: dict[str, Any] = {}
+    # The server has returned both of these since the temporal read shipped; the
+    # SDK was parsing responses without them, so callers saw a memory with no
+    # timestamp and no author even when the API sent both.
+    created_at: datetime | None = None
+    provenance: Provenance | None = None
+
+
+class RecentItem(BaseModel):
+    """One entry of the queryless feed.
+
+    Deliberately not a MemoryItem: the feed does no ranking, so relevance and
+    similarity would be meaningless numbers rather than absent ones.
+    """
+
+    atom_id: UUID
+    content: str
+    domain: str
+    created_at: datetime
+    concepts: list[str] = []
+    provenance: Provenance | None = None
+
+
+class RecentResponse(BaseModel):
+    items: list[RecentItem]
+    next_cursor: str | None = None
 
 
 class ReadResponse(BaseModel):

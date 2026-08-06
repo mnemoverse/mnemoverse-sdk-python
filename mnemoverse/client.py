@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from collections.abc import Coroutine
+from datetime import datetime
+from typing import Any, TypeVar
 from uuid import UUID
 
 from mnemoverse._async_client import AsyncMnemoClient
@@ -11,10 +13,13 @@ from mnemoverse.types import (
     FeedbackResponse,
     HealthResponse,
     ReadResponse,
+    RecentResponse,
     StatsResponse,
     WriteBatchResponse,
     WriteResponse,
 )
+
+T = TypeVar("T")
 
 
 class MnemoClient:
@@ -43,7 +48,7 @@ class MnemoClient:
             max_retries=max_retries,
         )
 
-    def _run(self, coro: Any) -> Any:
+    def _run(self, coro: Coroutine[Any, Any, T]) -> T:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -87,14 +92,54 @@ class MnemoClient:
         min_relevance: float = 0.3,
         include_associations: bool = True,
         concepts: list[str] | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+        order_by: str | None = None,
+        exclude_author: str | None = None,
     ) -> ReadResponse:
-        """Query memory with semantic search + Hebbian expansion."""
+        """Query memory with semantic search + Hebbian expansion.
+
+        ``since`` / ``until`` bound the result by creation time, inclusive at
+        both ends. ``order_by="recency"`` re-sorts the matched set newest-first
+        without changing which entries matched. ``exclude_author`` drops one
+        author principal.
+
+        For "what happened lately" rather than "what do I know about X", use
+        :meth:`recent` — search returns what MATCHES, so entries that exist but
+        do not match are absent, correctly but invisibly.
+        """
         return self._run(
             self._async_client.read(
                 query, top_k=top_k, domain=domain,
                 min_relevance=min_relevance,
                 include_associations=include_associations,
                 concepts=concepts,
+                since=since, until=until,
+                order_by=order_by, exclude_author=exclude_author,
+            )
+        )
+
+    def recent(
+        self,
+        *,
+        domain: str | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+        exclude_author: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> RecentResponse:
+        """List the newest entries first — no query, complete by construction.
+
+        The temporal complement of :meth:`read`: nothing is ranked away, so use
+        this when you need to be sure you are seeing everything. Paged by
+        ``next_cursor``, which continues the listing with no skips and no
+        duplicates even while writes are landing.
+        """
+        return self._run(
+            self._async_client.recent(
+                domain=domain, since=since, until=until,
+                exclude_author=exclude_author, limit=limit, cursor=cursor,
             )
         )
 
