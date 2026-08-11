@@ -311,6 +311,41 @@ async def test_server_errors_still_open_the_circuit_breaker(
     assert len(httpx_mock.get_requests()) == 5
 
 
+async def test_non_retryable_server_errors_still_open_the_circuit_breaker(
+    httpx_mock: HTTPXMock,
+):
+    """A wire retry instruction does not redefine service health.
+
+    A permanent 500 should not be retried, but five independent 500 responses
+    are still evidence that Core is unhealthy and must open the breaker.
+    """
+    for _ in range(5):
+        httpx_mock.add_response(
+            url="https://test.api.mnemoverse.com/api/v1/health",
+            status_code=500,
+            json={"message": "Permanent server failure", "retryable": False},
+        )
+    retrying_client = AsyncMnemoClient(
+        api_key="mk_test_abc123",
+        base_url="https://test.api.mnemoverse.com",
+        max_retries=2,
+    )
+
+    try:
+        for _ in range(5):
+            with pytest.raises(MnemoError) as exc_info:
+                await retrying_client.health()
+            assert exc_info.value.retryable is False
+
+        with pytest.raises(MnemoUnavailableError, match="Circuit breaker open"):
+            await retrying_client.health()
+    finally:
+        await retrying_client.close()
+
+    # One request per call proves retryable=false still controls retries.
+    assert len(httpx_mock.get_requests()) == 5
+
+
 async def test_recent_returns_the_feed_and_its_cursor(
     client: AsyncMnemoClient, httpx_mock: HTTPXMock
 ):

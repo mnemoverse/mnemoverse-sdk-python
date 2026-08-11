@@ -41,15 +41,16 @@ def _isoformat(value: datetime | str) -> str:
 def _counts_towards_breaker(exc: Exception) -> bool:
     """Whether an error is evidence that the service may be unhealthy.
 
-    An explicit wire instruction wins. Older responses have no instruction, so
-    preserve the historical status rule: 429 and 5xx count; other 4xx do not.
+    Retry policy and health policy are deliberately separate. Caller errors do
+    not count; a permanent 5xx still does even when Core says retrying it would
+    be futile. A non-retryable 429 is a permanent caller/quota rejection, while
+    older retryable/unspecified 429 responses retain the historical behaviour.
     Transport-shaped errors have no status and continue to count.
     """
-    if isinstance(exc, MnemoError):
-        if exc.retryable is not None:
-            return exc.retryable
-        if exc.status is not None:
-            return exc.status == 429 or exc.status >= 500
+    if isinstance(exc, MnemoError) and exc.status is not None:
+        if 400 <= exc.status < 500:
+            return exc.status == 429 and exc.retryable is not False
+        return exc.status >= 500
     return True
 
 
