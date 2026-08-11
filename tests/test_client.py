@@ -6,7 +6,13 @@ import pytest
 import httpx
 from pytest_httpx import HTTPXMock
 
-from mnemoverse import AsyncMnemoClient, MnemoAuthError, MnemoRateLimitError
+from mnemoverse import (
+    AsyncMnemoClient,
+    MnemoAuthError,
+    MnemoError,
+    MnemoRateLimitError,
+    MnemoUnavailableError,
+)
 
 
 @pytest.fixture
@@ -141,6 +147,84 @@ async def test_rate_limit_error(client: AsyncMnemoClient, httpx_mock: HTTPXMock)
         await client.read("test")
 
     assert exc_info.value.retry_after == 60.0
+
+
+async def test_client_errors_do_not_open_the_circuit_breaker(
+    client: AsyncMnemoClient, httpx_mock: HTTPXMock
+):
+    """Five rejected writes must not stop the sixth valid one from going out.
+
+    A 400 says the request was wrong, not that the service is down. Counting it
+    as a breaker failure reproduces the 2026-08-11 symptom exactly: after the
+    fifth over-length write the SDK stops issuing HTTP for 30s, blames the
+    service ("Circuit breaker open"), and leaves no server-side trace of the
+    writes it swallowed. mnemoverse-chat/packages/core-sdk/src/client.ts:175-178
+    already answers this the right way; this SDK answered it the other way.
+    """
+    over_length = {
+        "code": "VALIDATION_ERROR",
+        "message": "Request validation failed",
+        "requestId": "req_probe",
+        "retryable": False,
+        "details": {
+            "errors": [
+                {
+                    "loc": ["body", "content"],
+                    "msg": "String should have at most 10000 characters",
+                    "type": "string_too_long",
+                }
+            ]
+        },
+    }
+    for _ in range(5):
+        httpx_mock.add_response(
+            url="https://test.api.mnemoverse.com/api/v1/memory/write",
+            status_code=400,
+            json=over_length,
+        )
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/memory/write",
+        json={
+            "stored": True,
+            "atom_id": "550e8400-e29b-41d4-a716-446655440000",
+            "importance": 0.85,
+            "reason": "novel insight",
+        },
+    )
+
+    for _ in range(5):
+        with pytest.raises(MnemoError):
+            await client.write("x" * 10_001)
+
+    result = await client.write("a perfectly good memory")
+
+    assert result.stored is True
+    # Six requests, not five: the sixth must actually reach the wire.
+    assert len(httpx_mock.get_requests()) == 6
+
+
+async def test_server_errors_still_open_the_circuit_breaker(
+    client: AsyncMnemoClient, httpx_mock: HTTPXMock
+):
+    """The other side of the same rule, pinned so the fix above cannot overshoot.
+
+    Green before the fix as well as after — it is a regression pin, not a proof.
+    """
+    for _ in range(5):
+        httpx_mock.add_response(
+            url="https://test.api.mnemoverse.com/api/v1/health",
+            status_code=500,
+            json={"code": "INTERNAL", "message": "boom", "retryable": True},
+        )
+
+    for _ in range(5):
+        with pytest.raises(MnemoError):
+            await client.health()
+
+    with pytest.raises(MnemoUnavailableError, match="Circuit breaker open"):
+        await client.health()
+
+    assert len(httpx_mock.get_requests()) == 5
 
 
 async def test_recent_returns_the_feed_and_its_cursor(

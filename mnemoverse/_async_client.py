@@ -38,6 +38,21 @@ def _isoformat(value: datetime | str) -> str:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
+def _is_caller_error(exc: Exception) -> bool:
+    """True for a 4xx the server does not want retried — 429 excepted.
+
+    Such a response says the request was wrong, not that the service is
+    unhealthy, so it must not count towards the circuit breaker: five rejected
+    writes would otherwise stop the sixth valid one from being sent at all, and
+    the caller would be told the service was down. Same rule, and same
+    status-derived definition of retryable, as the TypeScript SDK —
+    mnemoverse-chat/packages/core-sdk/src/client.ts:175-178, errors.ts:20.
+    """
+    if not isinstance(exc, MnemoError) or exc.status is None:
+        return False
+    return 400 <= exc.status < 500 and exc.status != 429
+
+
 class AsyncMnemoClient:
     """Async client for the Mnemoverse Memory API.
 
@@ -261,10 +276,11 @@ class AsyncMnemoClient:
             )
             self._cb.on_success()
             return result
-        except (MnemoAuthError, MnemoError) as e:
-            if isinstance(e, MnemoAuthError):
-                raise
-            self._cb.on_failure()
+        except MnemoError as e:
+            # Auth failures and other caller errors are not evidence about the
+            # health of the service, so they leave the breaker where it is.
+            if not _is_caller_error(e):
+                self._cb.on_failure()
             raise
 
     async def _single_request(
