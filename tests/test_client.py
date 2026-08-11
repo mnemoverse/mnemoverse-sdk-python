@@ -6,7 +6,7 @@ import pytest
 import httpx
 from pytest_httpx import HTTPXMock
 
-from mnemoverse import AsyncMnemoClient, MnemoAuthError, MnemoRateLimitError
+from mnemoverse import AsyncMnemoClient, MnemoAuthError, MnemoError, MnemoRateLimitError
 
 
 @pytest.fixture
@@ -312,3 +312,84 @@ async def test_read_still_parses_a_response_without_the_new_fields(
 
     assert r.items[0].created_at is None
     assert r.items[0].provenance is None
+
+
+async def test_validation_error_names_the_field_and_the_limit(
+    client: AsyncMnemoClient, httpx_mock: HTTPXMock
+):
+    """A caller who sent 10 001 characters must be told which field and which limit.
+
+    Core's 400 carries no ``detail`` at all, and its ``message`` is the generic
+    "Request validation failed" — the field name and the number live one level
+    down, in ``details.errors[0]``. Reading only the top two keys threw the
+    only useful part of the response away, so the user got a sentence that
+    tells them nothing about what to change. Body copied from the shape core
+    actually emits (mnemoverse-core/src/mnemo/api/server.py:358-379).
+    """
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/memory/write",
+        status_code=400,
+        json={
+            "code": "VALIDATION_ERROR",
+            "message": "Request validation failed",
+            "requestId": "01KX77H1AX5E2457MDWRP1H72V",
+            "retryable": False,
+            "details": {
+                "errors": [
+                    {
+                        "loc": ["body", "content"],
+                        "msg": "String should have at most 10000 characters",
+                        "type": "string_too_long",
+                    }
+                ]
+            },
+        },
+    )
+
+    with pytest.raises(MnemoError) as exc_info:
+        await client.write("x" * 10_001)
+
+    assert str(exc_info.value) == (
+        "Request validation failed "
+        "(content: String should have at most 10000 characters)"
+    )
+
+
+async def test_validation_error_reports_every_field_that_failed(
+    client: AsyncMnemoClient, httpx_mock: HTTPXMock
+):
+    """One request can break several rules at once; naming only the first would
+    send the caller round the loop again for the second."""
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/memory/write",
+        status_code=400,
+        json={
+            "code": "VALIDATION_ERROR",
+            "message": "Request validation failed",
+            "requestId": "01KX77H1AX5E2457MDWRP1H72V",
+            "retryable": False,
+            "details": {
+                "errors": [
+                    {
+                        "loc": ["body", "content"],
+                        "msg": "String should have at most 10000 characters",
+                        "type": "string_too_long",
+                    },
+                    {
+                        "loc": ["body", "domain"],
+                        "msg": "String should have at most 100 characters",
+                        "type": "string_too_long",
+                    },
+                ]
+            },
+        },
+    )
+
+    with pytest.raises(MnemoError) as exc_info:
+        await client.write("x" * 10_001, domain="d" * 101)
+
+    assert str(exc_info.value) == (
+        "Request validation failed "
+        "(content: String should have at most 10000 characters; "
+        "domain: String should have at most 100 characters)"
+    )

@@ -38,6 +38,52 @@ def _isoformat(value: datetime | str) -> str:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
+# FastAPI prefixes each error location with where it was found; keeping it would
+# turn "content" into "body.content" for no gain to the reader.
+_LOC_SOURCES = ("body", "query", "path", "header", "cookie")
+
+
+def _error_field(loc: Any) -> str:
+    """Name the offending field from a validation error's ``loc`` path."""
+    if not isinstance(loc, list) or not loc:
+        return ""
+    parts = [str(p) for p in loc]
+    if len(parts) > 1 and parts[0] in _LOC_SOURCES:
+        parts = parts[1:]
+    return ".".join(parts)
+
+
+def _format_validation_errors(data: Any) -> str:
+    """Pull the field names and the limits out of a core error body.
+
+    Core answers a rejected request with a generic ``message`` — "Request
+    validation failed" — and puts everything that identifies the problem in
+    ``details.errors``: which field, and the number it exceeded
+    (mnemoverse-core/src/mnemo/api/server.py:358-379). Reporting only the
+    top-level message tells the caller that something was wrong but not what,
+    which is the difference between a fixable error and a mystery.
+
+    Returns an empty string for any body that is not shaped this way, so
+    non-validation errors and other services' error formats fall through
+    untouched.
+    """
+    details = data.get("details") if isinstance(data, dict) else None
+    errors = details.get("errors") if isinstance(details, dict) else None
+    if not isinstance(errors, list):
+        return ""
+
+    parts: list[str] = []
+    for err in errors:
+        if not isinstance(err, dict):
+            continue
+        msg = str(err.get("msg") or "").strip()
+        if not msg:
+            continue
+        field = _error_field(err.get("loc"))
+        parts.append(f"{field}: {msg}" if field else msg)
+    return "; ".join(parts)
+
+
 class AsyncMnemoClient:
     """Async client for the Mnemoverse Memory API.
 
@@ -300,8 +346,13 @@ class AsyncMnemoClient:
     def _extract_detail(response: httpx.Response) -> str:
         try:
             data = response.json()
-            if isinstance(data, dict):
-                return str(data.get("detail") or data.get("message") or data)
-            return str(data)
+            if not isinstance(data, dict):
+                return str(data)
         except Exception:
             return f"HTTP {response.status_code}"
+
+        summary = data.get("detail") or data.get("message")
+        specifics = _format_validation_errors(data)
+        if summary and specifics:
+            return f"{summary} ({specifics})"
+        return str(summary or specifics or data)
