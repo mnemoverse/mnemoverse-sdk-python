@@ -6,24 +6,37 @@ from __future__ import annotations
 class MnemoError(Exception):
     """Base error for all Mnemoverse API errors."""
 
-    def __init__(self, message: str, status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status: int | None = None,
+        retryable: bool | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.status = status
+        # ``None`` means the server did not send an instruction, so callers
+        # retain the SDK's status-based compatibility behaviour.
+        self.retryable = retryable
 
 
 class MnemoAuthError(MnemoError):
     """Invalid or missing API key (401/403)."""
 
     def __init__(self, message: str = "Invalid or missing API key") -> None:
-        super().__init__(message, status=401)
+        super().__init__(message, status=401, retryable=False)
 
 
 class MnemoRateLimitError(MnemoError):
     """Rate limit exceeded (429)."""
 
-    def __init__(self, message: str = "Rate limit exceeded", retry_after: float | None = None) -> None:
-        super().__init__(message, status=429)
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded",
+        retry_after: float | None = None,
+        retryable: bool | None = None,
+    ) -> None:
+        super().__init__(message, status=429, retryable=retryable)
         self.retry_after = retry_after
 
 

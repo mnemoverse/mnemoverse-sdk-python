@@ -38,19 +38,57 @@ def _isoformat(value: datetime | str) -> str:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
-def _is_caller_error(exc: Exception) -> bool:
-    """True for a 4xx the server does not want retried — 429 excepted.
+def _counts_towards_breaker(exc: Exception) -> bool:
+    """Whether an error is evidence that the service may be unhealthy.
 
-    Such a response says the request was wrong, not that the service is
-    unhealthy, so it must not count towards the circuit breaker: five rejected
-    writes would otherwise stop the sixth valid one from being sent at all, and
-    the caller would be told the service was down. Same rule, and same
-    status-derived definition of retryable, as the TypeScript SDK —
-    mnemoverse-chat/packages/core-sdk/src/client.ts:175-178, errors.ts:20.
+    An explicit wire instruction wins. Older responses have no instruction, so
+    preserve the historical status rule: 429 and 5xx count; other 4xx do not.
+    Transport-shaped errors have no status and continue to count.
     """
-    if not isinstance(exc, MnemoError) or exc.status is None:
-        return False
-    return 400 <= exc.status < 500 and exc.status != 429
+    if isinstance(exc, MnemoError):
+        if exc.retryable is not None:
+            return exc.retryable
+        if exc.status is not None:
+            return exc.status == 429 or exc.status >= 500
+    return True
+
+
+# FastAPI prefixes each error location with where it was found; keeping it would
+# turn "content" into "body.content" for no gain to the reader.
+_LOC_SOURCES = ("body", "query", "path", "header", "cookie")
+
+
+def _error_field(loc: Any) -> str:
+    """Name the offending field from a validation error's ``loc`` path."""
+    if not isinstance(loc, list) or not loc:
+        return ""
+    parts = [str(part) for part in loc]
+    if len(parts) > 1 and parts[0] in _LOC_SOURCES:
+        parts = parts[1:]
+    return ".".join(parts)
+
+
+def _format_validation_errors(data: Any, summary: str) -> str:
+    """Extract actionable validation details not already present in summary."""
+    details = data.get("details") if isinstance(data, dict) else None
+    errors = details.get("errors") if isinstance(details, dict) else None
+    if not isinstance(errors, list):
+        return ""
+
+    parts: list[str] = []
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        message = str(error.get("msg") or "").strip()
+        if not message:
+            continue
+        field = _error_field(error.get("loc"))
+        rendered = f"{field}: {message}" if field else message
+        # Core versions that enrich their top-level message may already carry
+        # this exact detail (possibly with the source prefix, e.g. ``body.``).
+        if rendered not in summary:
+            parts.append(rendered)
+    return "; ".join(parts)
 
 
 class AsyncMnemoClient:
@@ -257,13 +295,13 @@ class AsyncMnemoClient:
             )
 
         def is_retryable(e: Exception) -> bool:
+            if isinstance(e, MnemoError) and e.retryable is not None:
+                return e.retryable
             if isinstance(e, MnemoRateLimitError):
                 return True
             if isinstance(e, MnemoError) and e.status and e.status >= 500:
                 return True
-            if isinstance(e, (httpx.ConnectError, httpx.TimeoutException)):
-                return True
-            return False
+            return isinstance(e, (httpx.ConnectError, httpx.TimeoutException))
 
         async def attempt() -> Any:
             return await self._single_request(method, path, json)
@@ -277,9 +315,7 @@ class AsyncMnemoClient:
             self._cb.on_success()
             return result
         except MnemoError as e:
-            # Auth failures and other caller errors are not evidence about the
-            # health of the service, so they leave the breaker where it is.
-            if not _is_caller_error(e):
+            if _counts_towards_breaker(e):
                 self._cb.on_failure()
             raise
 
@@ -297,27 +333,39 @@ class AsyncMnemoClient:
         except httpx.ConnectError as e:
             raise MnemoUnavailableError(f"Connection error: {e}", e)
 
+        if response.status_code < 400:
+            return response.json()
+
+        detail, retryable = self._extract_error(response)
+
         if response.status_code == 401 or response.status_code == 403:
-            raise MnemoAuthError(self._extract_detail(response))
+            raise MnemoAuthError(detail)
 
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After")
             raise MnemoRateLimitError(
-                self._extract_detail(response),
+                detail,
                 retry_after=float(retry_after) if retry_after else None,
+                retryable=retryable,
             )
 
-        if response.status_code >= 400:
-            raise MnemoError(self._extract_detail(response), status=response.status_code)
-
-        return response.json()
+        raise MnemoError(detail, status=response.status_code, retryable=retryable)
 
     @staticmethod
-    def _extract_detail(response: httpx.Response) -> str:
+    def _extract_error(response: httpx.Response) -> tuple[str, bool | None]:
         try:
             data = response.json()
-            if isinstance(data, dict):
-                return str(data.get("detail") or data.get("message") or data)
-            return str(data)
-        except Exception:
-            return f"HTTP {response.status_code}"
+            if not isinstance(data, dict):
+                return str(data), None
+        except ValueError:
+            return f"HTTP {response.status_code}", None
+
+        summary_value = data.get("detail") or data.get("message")
+        summary = str(summary_value) if summary_value else ""
+        specifics = _format_validation_errors(data, summary)
+        if summary and specifics:
+            message = f"{summary} ({specifics})"
+        else:
+            message = str(summary or specifics or data)
+        retryable = data.get("retryable")
+        return message, retryable if isinstance(retryable, bool) else None

@@ -149,6 +149,90 @@ async def test_rate_limit_error(client: AsyncMnemoClient, httpx_mock: HTTPXMock)
     assert exc_info.value.retry_after == 60.0
 
 
+async def test_wire_non_retryable_rate_limit_is_not_retried(httpx_mock: HTTPXMock):
+    """Core can use 429 for a permanent quota rejection, not just throttling.
+
+    The wire-level ``retryable`` flag is the authority: retrying a permanent
+    rejection wastes requests and turns the useful API error into a breaker
+    failure.
+    """
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/memory/read",
+        status_code=429,
+        json={"message": "Quota exhausted", "retryable": False},
+    )
+    retrying_client = AsyncMnemoClient(
+        api_key="mk_test_abc123",
+        base_url="https://test.api.mnemoverse.com",
+        max_retries=2,
+    )
+
+    try:
+        with pytest.raises(MnemoRateLimitError) as exc_info:
+            await retrying_client.read("test")
+    finally:
+        await retrying_client.close()
+
+    assert exc_info.value.retryable is False
+    assert len(httpx_mock.get_requests()) == 1
+
+
+async def test_wire_non_retryable_rate_limits_do_not_open_breaker(
+    client: AsyncMnemoClient, httpx_mock: HTTPXMock
+):
+    """Five permanent quota rejections must not suppress a valid sixth call."""
+    for _ in range(5):
+        httpx_mock.add_response(
+            url="https://test.api.mnemoverse.com/api/v1/memory/write",
+            status_code=429,
+            json={"message": "Quota exhausted", "retryable": False},
+        )
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/memory/write",
+        json={
+            "stored": True,
+            "atom_id": "550e8400-e29b-41d4-a716-446655440000",
+            "importance": 0.85,
+            "reason": "novel insight",
+        },
+    )
+
+    for _ in range(5):
+        with pytest.raises(MnemoRateLimitError):
+            await client.write("rejected by quota")
+
+    result = await client.write("accepted after quota changes")
+
+    assert result.stored is True
+    assert len(httpx_mock.get_requests()) == 6
+
+
+async def test_rate_limit_without_wire_retryable_keeps_legacy_retry(
+    httpx_mock: HTTPXMock,
+):
+    """Older Core responses omit the flag; status 429 must still retry."""
+    for _ in range(2):
+        httpx_mock.add_response(
+            url="https://test.api.mnemoverse.com/api/v1/memory/read",
+            status_code=429,
+            json={"detail": "Rate limit exceeded"},
+        )
+    retrying_client = AsyncMnemoClient(
+        api_key="mk_test_abc123",
+        base_url="https://test.api.mnemoverse.com",
+        max_retries=1,
+    )
+
+    try:
+        with pytest.raises(MnemoRateLimitError) as exc_info:
+            await retrying_client.read("test")
+    finally:
+        await retrying_client.close()
+
+    assert exc_info.value.retryable is None
+    assert len(httpx_mock.get_requests()) == 2
+
+
 async def test_client_errors_do_not_open_the_circuit_breaker(
     client: AsyncMnemoClient, httpx_mock: HTTPXMock
 ):
@@ -396,3 +480,106 @@ async def test_read_still_parses_a_response_without_the_new_fields(
 
     assert r.items[0].created_at is None
     assert r.items[0].provenance is None
+
+
+async def test_validation_error_names_the_field_and_the_limit(
+    client: AsyncMnemoClient, httpx_mock: HTTPXMock
+):
+    """Expose the actionable validation detail instead of only its summary."""
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/memory/write",
+        status_code=400,
+        json={
+            "code": "VALIDATION_ERROR",
+            "message": "Request validation failed",
+            "requestId": "01KX77H1AX5E2457MDWRP1H72V",
+            "retryable": False,
+            "details": {
+                "errors": [
+                    {
+                        "loc": ["body", "content"],
+                        "msg": "String should have at most 10000 characters",
+                        "type": "string_too_long",
+                    }
+                ]
+            },
+        },
+    )
+
+    with pytest.raises(MnemoError) as exc_info:
+        await client.write("x" * 10_001)
+
+    assert str(exc_info.value) == (
+        "Request validation failed "
+        "(content: String should have at most 10000 characters)"
+    )
+    assert exc_info.value.retryable is False
+
+
+async def test_validation_error_reports_every_field_that_failed(
+    client: AsyncMnemoClient, httpx_mock: HTTPXMock
+):
+    """One response can carry several independent, actionable failures."""
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/memory/write",
+        status_code=400,
+        json={
+            "code": "VALIDATION_ERROR",
+            "message": "Request validation failed",
+            "retryable": False,
+            "details": {
+                "errors": [
+                    {
+                        "loc": ["body", "content"],
+                        "msg": "String should have at most 10000 characters",
+                        "type": "string_too_long",
+                    },
+                    {
+                        "loc": ["body", "domain"],
+                        "msg": "String should have at most 100 characters",
+                        "type": "string_too_long",
+                    },
+                ]
+            },
+        },
+    )
+
+    with pytest.raises(MnemoError) as exc_info:
+        await client.write("x" * 10_001, domain="d" * 101)
+
+    assert str(exc_info.value) == (
+        "Request validation failed "
+        "(content: String should have at most 10000 characters; "
+        "domain: String should have at most 100 characters)"
+    )
+
+
+async def test_enriched_validation_summary_is_not_duplicated(
+    client: AsyncMnemoClient, httpx_mock: HTTPXMock
+):
+    """Newer Core versions may already copy the first detail into ``message``."""
+    summary = (
+        "Request validation failed: body.content: "
+        "String should have at most 10000 characters"
+    )
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/memory/write",
+        status_code=400,
+        json={
+            "message": summary,
+            "retryable": False,
+            "details": {
+                "errors": [
+                    {
+                        "loc": ["body", "content"],
+                        "msg": "String should have at most 10000 characters",
+                    }
+                ]
+            },
+        },
+    )
+
+    with pytest.raises(MnemoError) as exc_info:
+        await client.write("x" * 10_001)
+
+    assert str(exc_info.value) == summary
