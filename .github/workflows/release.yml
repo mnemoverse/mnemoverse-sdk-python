@@ -148,6 +148,31 @@ jobs:
           print("py.typed present; __all__ exports:", len(mnemoverse.__all__))
           PY
 
+      # A malformed secret must say so in one line, not in a 20-line traceback.
+      # v0.2.0's first attempt died inside requests with
+      # `UnicodeEncodeError: 'latin-1' codec can't encode characters in
+      # position 0-1` — the stored token began with two non-ASCII characters
+      # (a paste that picked up Cyrillic or invisible ones). Nothing was
+      # uploaded, but the cause took a log dig to find. PyPI tokens are ASCII
+      # and start with `pypi-`; check that before handing it to the uploader.
+      - name: The stored token must look like a PyPI token
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PYPI_TOKEN:-}" ]; then
+            echo "::error::PYPI_API_TOKEN is empty or unset — add it at Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          if printf '%s' "$PYPI_TOKEN" | LC_ALL=C grep -q '[^ -~]'; then
+            echo "::error::PYPI_API_TOKEN contains non-ASCII characters — re-copy the token from pypi.org; a paste picked up invisible or Cyrillic characters"
+            exit 1
+          fi
+          case "$PYPI_TOKEN" in
+            pypi-*) echo "token shape ok (${#PYPI_TOKEN} chars, pypi- prefix)" ;;
+            *) echo "::error::PYPI_API_TOKEN does not start with 'pypi-' — that is not a PyPI API token"; exit 1 ;;
+          esac
+
       # Auth is a repo secret, mirroring the sibling npm package's NPM_TOKEN.
       # Trusted Publishing (OIDC, no stored secret) is the better shape and the
       # action supports it by simply omitting `password:` — switch by deleting
