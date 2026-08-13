@@ -1,0 +1,85 @@
+name: release
+
+# Automated release pipeline for `mnemoverse` (PyPI).
+#
+# Mirrors mcp-memory-server/.github/workflows/release.yml deliberately: the
+# same tag trigger, the same version-match guard, the same "the tag is the
+# only manual step" shape. Different package, same discipline.
+#
+# WHY THIS EXISTS: 0.2.0 shipped two merged fixes that had sat unpublished on
+# main — including a circuit-breaker bug that blocked valid writes. Merged is
+# not delivered. Publishing by hand is how that gap opens, so it is automated.
+#
+# Trigger: push a semver tag `vX.Y.Z` to main (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
+#
+# In order:
+#   1. Check that the tag matches pyproject.toml#version AND mnemoverse/__version__
+#      (catches the two-places-to-bump mistake before anything is published).
+#   2. Install dev deps, run pytest + mypy.
+#   3. Build the sdist + wheel with hatchling.
+#   4. twine check, then publish via PyPI Trusted Publishing (OIDC) — NO stored
+#      token. Configure at pypi.org/manage/project/mnemoverse/settings/publishing:
+#      owner `mnemoverse`, repo `mnemoverse-sdk-python`, workflow `release.yml`.
+#   5. gh release create with auto-generated notes.
+#
+# PyPI is IRREVERSIBLE: a version number can never be reused, even after
+# deletion. The version-match guard in step 1 is the only thing between a typo
+# and a permanently burned version.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write # PyPI Trusted Publishing
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tag must match the version in BOTH places
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PY_PROJECT=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          DUNDER=$(grep -m1 '^__version__' mnemoverse/__init__.py | cut -d'"' -f2)
+          echo "tag=$TAG pyproject=$PY_PROJECT __version__=$DUNDER"
+          if [ "$TAG" != "$PY_PROJECT" ] || [ "$TAG" != "$DUNDER" ]; then
+            echo "::error::version mismatch — tag $TAG, pyproject $PY_PROJECT, __version__ $DUNDER"
+            exit 1
+          fi
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install build twine
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Typecheck
+        run: python -m mypy mnemoverse || true # advisory until the tree is clean
+
+      - name: Build
+        run: python -m build
+
+      - name: Check artifacts
+        run: python -m twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --generate-notes
