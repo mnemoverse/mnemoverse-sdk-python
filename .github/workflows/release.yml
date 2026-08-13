@@ -3,8 +3,15 @@ name: release
 # Automated release pipeline for `mnemoverse` (PyPI).
 #
 # Mirrors mcp-memory-server/.github/workflows/release.yml deliberately: the
-# same tag trigger, the same version-match guard, the same "the tag is the
-# only manual step" shape. Different package, same discipline.
+# same tag trigger, the same version-match guard, the same refusal to publish
+# anything the guards have not checked. Different package, same discipline.
+#
+# TO RELEASE:
+#   1. Bump the version in pyproject.toml AND mnemoverse/__init__.py.
+#   2. Move CHANGELOG.md's [Unreleased] content under `## [X.Y.Z] — DATE`.
+#   3. Open a PR, get it green, MERGE it.
+#   4. git pull && git tag vX.Y.Z && git push origin vX.Y.Z   <- tags the merge commit
+# Steps 1-3 are manual on purpose; the guards below exist because they are.
 #
 # WHY THIS EXISTS: 0.2.0 shipped two merged fixes that had sat unpublished on
 # main — including a circuit-breaker bug that blocked valid writes. Merged is
@@ -13,14 +20,21 @@ name: release
 # Trigger: push a semver tag `vX.Y.Z` to main (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
 #
 # In order:
-#   1. Check that the tag matches pyproject.toml#version AND mnemoverse/__version__
-#      (catches the two-places-to-bump mistake before anything is published).
-#   2. Install dev deps, run pytest + mypy.
-#   3. Build the sdist + wheel with hatchling.
-#   4. twine check, then publish via PyPI Trusted Publishing (OIDC) — NO stored
-#      token. Configure at pypi.org/manage/project/mnemoverse/settings/publishing:
-#      owner `mnemoverse`, repo `mnemoverse-sdk-python`, workflow `release.yml`.
-#   5. gh release create with auto-generated notes.
+#   1. Refuse a tag that is not an ancestor of main — an unmerged branch must
+#      not reach an irreversible index.
+#   2. Check the tag against pyproject.toml, mnemoverse/__version__ AND the
+#      CHANGELOG heading; report every mismatch, not the first.
+#   3. Install dev deps, run pytest, run mypy (strict, NOT advisory).
+#   4. Build the sdist + wheel with hatchling, then twine check.
+#   5. Install the BUILT WHEEL into a clean venv and assert what only the
+#      artifact can prove: it imports without dev deps, it carries py.typed,
+#      and every name in __all__ is really exported.
+#   6. Publish via PyPI Trusted Publishing (OIDC) — NO stored token. Configure
+#      at pypi.org/manage/project/mnemoverse/settings/publishing: owner
+#      `mnemoverse`, repo `mnemoverse-sdk-python`, workflow `release.yml`,
+#      Environment name LEFT BLANK (this workflow declares no environment).
+#   7. Read back pypi.org/pypi/mnemoverse/json and assert the version is served.
+#   8. gh release create with auto-generated notes.
 #
 # PyPI is IRREVERSIBLE: a version number can never be reused, even after
 # deletion. The version-match guard in step 1 is the only thing between a typo
@@ -30,33 +44,58 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
   contents: write
   id-token: write # PyPI Trusted Publishing
 
+# A tag pushed twice, or two tags in quick succession, would race at the
+# publish step and the loser fails with a 400. Never cancel in flight: a
+# half-run release is worse than a queued one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: pypi
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the ancestry check below needs real history
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Tag must match the version in BOTH places
+      # The tag must be ON MAIN. Without this, `git tag v0.2.0` on an unmerged
+      # branch passes every other check and publishes irreversibly from code
+      # that was never reviewed. Caught in the 0.2.0 review.
+      - name: Tag must be an ancestor of main
         run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main — merge the PR first, then tag the merge commit"
+            exit 1
+          fi
+
+      # The version lives in THREE places. The sibling npm package shipped a
+      # release PR with a stale lockfile because its guard checked one file
+      # (mcp-memory-server#81) — same shape, so this one checks all three.
+      - name: Tag must match pyproject, __version__ and the CHANGELOG heading
+        run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME#v}"
           PY_PROJECT=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
           DUNDER=$(grep -m1 '^__version__' mnemoverse/__init__.py | cut -d'"' -f2)
           echo "tag=$TAG pyproject=$PY_PROJECT __version__=$DUNDER"
-          if [ "$TAG" != "$PY_PROJECT" ] || [ "$TAG" != "$DUNDER" ]; then
-            echo "::error::version mismatch — tag $TAG, pyproject $PY_PROJECT, __version__ $DUNDER"
-            exit 1
-          fi
+          FAIL=0
+          [ "$TAG" = "$PY_PROJECT" ] || { echo "::error::pyproject.toml reads $PY_PROJECT, tag expects $TAG"; FAIL=1; }
+          [ "$TAG" = "$DUNDER" ] || { echo "::error::__version__ reads $DUNDER, tag expects $TAG"; FAIL=1; }
+          grep -q "^## \[$TAG\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## [$TAG]' section — an unreleased version must not be published"; FAIL=1; }
+          [ "$FAIL" -eq 0 ] || exit 1
 
       - name: Install
         run: |
@@ -68,7 +107,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Typecheck
-        run: python -m mypy mnemoverse || true # advisory until the tree is clean
+        run: python -m mypy mnemoverse
 
       - name: Build
         run: python -m build
@@ -76,8 +115,56 @@ jobs:
       - name: Check artifacts
         run: python -m twine check dist/*
 
+      # EXERCISE THE ARTIFACT, not the source tree. Everything above this line
+      # imports `mnemoverse` from the editable install, so anything that fails
+      # to make it INTO the wheel is invisible — which is exactly how 0.2.0
+      # nearly shipped a `Typing :: Typed` classifier with no py.typed marker,
+      # silently degrading every consumer's type checker to `Any`. twine check
+      # validates METADATA renderability, never contents.
+      - name: The built wheel must be installable and honest
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/verify
+          /tmp/verify/bin/python -m pip install --quiet --force-reinstall dist/*.whl
+          /tmp/verify/bin/python - <<'PY'
+          import importlib.resources as res
+          import mnemoverse
+
+          # Imports with no dev dependencies present: catches a runtime import
+          # declared only in the dev extra.
+          print("version:", mnemoverse.__version__)
+
+          # The typing claim in the classifier must be backed by the marker.
+          assert (res.files("mnemoverse") / "py.typed").is_file(), \
+              "wheel declares Typing :: Typed but ships no py.typed marker"
+
+          # Every name the package advertises must actually be importable.
+          missing = [n for n in mnemoverse.__all__ if not hasattr(mnemoverse, n)]
+          assert not missing, f"__all__ advertises names the wheel does not export: {missing}"
+          print("py.typed present; __all__ exports:", len(mnemoverse.__all__))
+          PY
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      # Read back what the index actually serves. Mirrors the sibling's
+      # registry check (mcp-memory-server release.yml): a publish step that
+      # exits 0 is a claim, not a confirmation.
+      - name: PyPI must serve the new version
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL "https://pypi.org/pypi/mnemoverse/json" \
+                 | python -c "import json,sys; sys.exit(0 if '$VERSION' in json.load(sys.stdin)['releases'] else 1)"; then
+              echo "pypi serves $VERSION"
+              exit 0
+            fi
+            echo "not visible yet (attempt $attempt), waiting…"
+            sleep 10
+          done
+          echo "::error::published, but pypi.org does not list $VERSION after 60s — check the project page before assuming success"
+          exit 1
 
       - name: GitHub release
         env:

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mnemoverse"
 version = "0.2.0"
-description = "Persistent memory API for AI agents — Python SDK for Mnemoverse. Works with Claude, Cursor, ChatGPT, and any MCP client."
+description = "Official Python SDK for Mnemoverse — persistent memory for AI agents. Sync and async REST client."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -16,7 +16,6 @@ keywords = [
     "ai-memory",
     "persistent-memory",
     "ai-agents",
-    "mcp-server",
     "claude",
     "cursor",
     "chatgpt",
@@ -50,7 +49,7 @@ Documentation = "https://mnemoverse.com/docs/api/python-sdk"
 Repository = "https://github.com/mnemoverse/mnemoverse-sdk-python"
 Source = "https://github.com/mnemoverse/mnemoverse-sdk-python"
 Issues = "https://github.com/mnemoverse/mnemoverse-sdk-python/issues"
-Changelog = "https://github.com/mnemoverse/mnemoverse-sdk-python/releases"
+Changelog = "https://github.com/mnemoverse/mnemoverse-sdk-python/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
