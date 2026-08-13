@@ -60,10 +60,37 @@ async with AsyncMnemoClient(api_key="mk_live_YOUR_KEY") as client:
 |--------|-------------|
 | `write(content, concepts, domain, metadata)` | Store a memory |
 | `write_batch(items)` | Store up to 500 memories |
-| `read(query, top_k, domain)` | Query with Hebbian expansion |
+| `read(query, top_k, domain, since, until, order_by, exclude_author)` | Semantic search — "what do I know about X" |
+| `recent(domain, since, until, exclude_author, limit, cursor)` | Newest-first feed — "what happened lately" |
 | `feedback(atom_ids, outcome)` | Report success/failure |
 | `stats()` | Memory statistics |
 | `health()` | API health check |
+
+Every method exists on both `MnemoClient` (sync) and `AsyncMnemoClient` (async).
+
+### Search or feed?
+
+`read()` answers *what do I know about X* and ranks by relevance. `recent()`
+answers *what happened lately* and is complete within one scope by
+construction — nothing is skipped, which a semantic search cannot promise.
+Reach for `recent()` to resume after a break or to catch up on a shared room.
+
+```python
+from mnemoverse import MnemoClient
+
+client = MnemoClient(api_key="mk_live_...")
+
+# Catch up on a shared room. Rooms are SEPARATE stores: pass the address as
+# `domain`, or an unscoped feed will not cover them.
+page = client.recent(domain="xroom:room_01ABC", since="2026-08-01T00:00:00Z", limit=20)
+for item in page.items:
+    print(item.created_at, item.content)
+
+if page.next_cursor:
+    page = client.recent(domain="xroom:room_01ABC", cursor=page.next_cursor)
+```
+
+Read items carry `created_at` and `provenance` (who wrote it, where from).
 
 ## Documentation
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-import httpx
 from pytest_httpx import HTTPXMock
 
 from mnemoverse import (
