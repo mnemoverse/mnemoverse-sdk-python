@@ -29,10 +29,11 @@ name: release
 #   5. Install the BUILT WHEEL into a clean venv and assert what only the
 #      artifact can prove: it imports without dev deps, it carries py.typed,
 #      and every name in __all__ is really exported.
-#   6. Publish via PyPI Trusted Publishing (OIDC) — NO stored token. Configure
-#      at pypi.org/manage/project/mnemoverse/settings/publishing: owner
-#      `mnemoverse`, repo `mnemoverse-sdk-python`, workflow `release.yml`,
-#      Environment name LEFT BLANK (this workflow declares no environment).
+#   6. Publish to PyPI using the PYPI_API_TOKEN repo secret (project-scoped
+#      token from pypi.org/manage/account/token). Same shape as the sibling
+#      npm package's NPM_TOKEN. Trusted Publishing (OIDC) is the stronger
+#      option and the step is one `with:` block away from it — see the
+#      comment on the publish step.
 #   7. Read back pypi.org/pypi/mnemoverse/json and assert the version is served.
 #   8. gh release create with auto-generated notes.
 #
@@ -46,8 +47,11 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  id-token: write # PyPI Trusted Publishing
+  contents: write # gh release create
+  # id-token is NOT granted: this workflow authenticates to PyPI with a stored
+  # token, so an OIDC identity would be authority it never uses. Restore it if
+  # the publish step ever moves to Trusted Publishing.
+  id-token: none
 
 # A tag pushed twice, or two tags in quick succession, would race at the
 # publish step and the loser fails with a 400. Never cancel in flight: a
@@ -144,8 +148,14 @@ jobs:
           print("py.typed present; __all__ exports:", len(mnemoverse.__all__))
           PY
 
+      # Auth is a repo secret, mirroring the sibling npm package's NPM_TOKEN.
+      # Trusted Publishing (OIDC, no stored secret) is the better shape and the
+      # action supports it by simply omitting `password:` — switch by deleting
+      # the `with:` block below and registering the publisher on pypi.org.
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
 
       # Read back what the index actually serves. Mirrors the sibling's
       # registry check (mcp-memory-server release.yml): a publish step that
