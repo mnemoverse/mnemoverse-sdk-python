@@ -8,6 +8,7 @@ from pytest_httpx import HTTPXMock
 from mnemoverse import (
     AsyncMnemoClient,
     MnemoAuthError,
+    MnemoClient,
     MnemoError,
     MnemoRateLimitError,
     MnemoUnavailableError,
@@ -22,6 +23,51 @@ def client():
         timeout=5.0,
         max_retries=0,  # no retries in tests
     )
+
+
+def test_explicit_api_key_wins_over_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MNEMOVERSE_API_KEY", "mk_env_key")
+    client = AsyncMnemoClient(api_key="mk_explicit_key")
+
+    assert client._api_key == "mk_explicit_key"
+
+
+def test_api_key_falls_back_to_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MNEMOVERSE_API_KEY", "mk_env_key")
+    client = AsyncMnemoClient()
+
+    assert client._api_key == "mk_env_key"
+
+
+def test_empty_string_api_key_is_treated_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty string is not a key — it falls through to the environment
+    exactly like ``None``, matching the constructor docstring."""
+    monkeypatch.setenv("MNEMOVERSE_API_KEY", "mk_env_key")
+    client = AsyncMnemoClient(api_key="")
+
+    assert client._api_key == "mk_env_key"
+
+
+def test_missing_api_key_and_environment_raises_a_clear_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MNEMOVERSE_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="api_key"):
+        AsyncMnemoClient()
+
+    monkeypatch.delenv("MNEMOVERSE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="MNEMOVERSE_API_KEY"):
+        AsyncMnemoClient(api_key="")
+
+
+def test_sync_client_also_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MnemoClient forwards to AsyncMnemoClient, which resolves the key —
+    the fallback must not be duplicated (or missed) in the sync wrapper."""
+    monkeypatch.setenv("MNEMOVERSE_API_KEY", "mk_env_key")
+    client = MnemoClient()
+
+    assert client._async_client._api_key == "mk_env_key"
 
 
 async def test_write(client: AsyncMnemoClient, httpx_mock: HTTPXMock):

@@ -29,14 +29,20 @@ class MnemoClient:
     For async applications (FastAPI, Discord bots), use AsyncMnemoClient directly.
 
     Usage:
-        client = MnemoClient(api_key="mk_live_...")
+        # export MNEMOVERSE_API_KEY=mk_live_...
+        client = MnemoClient()
         result = client.write("Caching reduces latency", concepts=["caching"])
         memories = client.read("how to reduce latency?")
+
+    ``api_key`` is optional: when it is ``None`` or empty, the key is read
+    from the ``MNEMOVERSE_API_KEY`` environment variable. An explicit
+    ``api_key`` always wins over the environment. Raises ``ValueError`` when
+    neither is set.
     """
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         base_url: str = "https://core.mnemoverse.com",
         timeout: float = 10.0,
         max_retries: int = 3,

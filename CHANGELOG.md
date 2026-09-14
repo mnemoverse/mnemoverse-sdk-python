@@ -21,6 +21,15 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **`api_key` is now optional on `MnemoClient` and `AsyncMnemoClient`.** When
+  omitted or empty, the key is read from the `MNEMOVERSE_API_KEY` environment
+  variable, matching the MCP server and the other Mnemoverse SDKs. An
+  explicit `api_key` argument still always wins over the environment; a
+  clear `ValueError` is raised when neither is set. No `.env` file loading
+  was added.
+
 ## [0.2.0] — 2026-08-13
 
 First release since 0.1.0. Everything below existed only on `main` until now,
