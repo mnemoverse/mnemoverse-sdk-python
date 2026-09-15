@@ -70,6 +70,44 @@ def test_sync_client_also_reads_the_environment(monkeypatch: pytest.MonkeyPatch)
     assert client._async_client._api_key == "mk_env_key"
 
 
+async def test_async_client_sends_the_env_resolved_key_on_the_wire(
+    monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock
+) -> None:
+    """The prior tests only checked the private ``_api_key`` attribute; this
+    checks what actually reaches the network. The client has no
+    ``Authorization`` header: it authenticates with ``X-Api-Key``."""
+    monkeypatch.setenv("MNEMOVERSE_API_KEY", "mk_env_key")
+    client = AsyncMnemoClient(base_url="https://test.api.mnemoverse.com")
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/health",
+        json={"status": "ok", "database": True, "version": "1.0.0"},
+    )
+
+    await client.health()
+
+    request = httpx_mock.get_requests()[-1]
+    assert request.headers["X-Api-Key"] == "mk_env_key"
+
+
+def test_sync_client_sends_the_env_resolved_key_on_the_wire(
+    monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock
+) -> None:
+    """Same check through the sync wrapper, which routes every call through
+    the same ``AsyncMnemoClient``: the header must carry the resolved key
+    here too, not just the attribute the wrapper forwards."""
+    monkeypatch.setenv("MNEMOVERSE_API_KEY", "mk_env_key")
+    client = MnemoClient(base_url="https://test.api.mnemoverse.com")
+    httpx_mock.add_response(
+        url="https://test.api.mnemoverse.com/api/v1/health",
+        json={"status": "ok", "database": True, "version": "1.0.0"},
+    )
+
+    client.health()
+
+    request = httpx_mock.get_requests()[-1]
+    assert request.headers["X-Api-Key"] == "mk_env_key"
+
+
 async def test_write(client: AsyncMnemoClient, httpx_mock: HTTPXMock):
     httpx_mock.add_response(
         url="https://test.api.mnemoverse.com/api/v1/memory/write",
