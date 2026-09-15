@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -26,6 +27,25 @@ from mnemoverse.types import (
 )
 
 _DEFAULT_BASE_URL = "https://core.mnemoverse.com"
+_API_KEY_ENV_VAR = "MNEMOVERSE_API_KEY"
+
+
+def _resolve_api_key(api_key: str | None) -> str:
+    """Resolve the API key: explicit argument wins, then the environment.
+
+    An empty string is treated the same as ``None`` — a caller that
+    interpolates a missing config value into an empty string should not
+    silently pass "no api_key" checks.
+    """
+    if api_key:
+        return api_key
+    env_key = os.environ.get(_API_KEY_ENV_VAR)
+    if env_key:
+        return env_key
+    raise ValueError(
+        "No API key: pass api_key= or set the "
+        f"{_API_KEY_ENV_VAR} environment variable"
+    )
 
 
 def _isoformat(value: datetime | str) -> str:
@@ -103,12 +123,19 @@ class AsyncMnemoClient:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = 10.0,
         max_retries: int = 3,
     ) -> None:
-        self._api_key = api_key
+        """Create a client.
+
+        ``api_key`` is optional: when it is ``None`` or empty, the key is
+        read from the ``MNEMOVERSE_API_KEY`` environment variable. An
+        explicit ``api_key`` always wins over the environment. Raises
+        ``ValueError`` when neither is set.
+        """
+        self._api_key = _resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._max_retries = max_retries

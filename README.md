@@ -15,10 +15,16 @@ pip install mnemoverse
 
 ## Quick Start
 
+```bash
+export MNEMOVERSE_API_KEY=mk_live_YOUR_KEY
+```
+
 ```python
 from mnemoverse import MnemoClient
 
-client = MnemoClient(api_key="mk_live_YOUR_KEY")
+client = MnemoClient()
+# or pass it explicitly — an explicit api_key always wins over the environment:
+# client = MnemoClient(api_key="mk_live_YOUR_KEY")
 
 # Store a memory
 result = client.write(
