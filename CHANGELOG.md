@@ -21,6 +21,11 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-16
+
+0.2.0's synchronous client failed on every second call. This release fixes
+it. If you are running 0.2.0, upgrade.
+
 ### Fixed
 
 - **The synchronous client no longer fails on every second call.** In 0.2.0,
@@ -82,6 +87,9 @@ keyword argument is a MINOR, even pre-1.0.
   explicit `api_key` argument still always wins over the environment; a
   clear `ValueError` is raised when neither is set. No `.env` file loading
   was added.
+
+- **`MnemoClient` supports `with MnemoClient() as client:`.** The context
+  manager calls `close()` on exit, same as calling it directly.
 
 ## [0.2.0] — 2026-08-13
 
