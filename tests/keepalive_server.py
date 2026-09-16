@@ -14,12 +14,21 @@ So the rule this file exists to enforce: **any HTTP double for this SDK keeps
 connections alive.** ``protocol_version = "HTTP/1.1"`` plus an honest
 ``Content-Length`` on every response, and ``connections`` counted so a test can
 assert the reuse really happened rather than trusting that it did.
+
+``connections`` alone is not enough for one question, though, and the gap let a
+second bug hide. It counts opens and never comes back down, so a socket that
+was closed properly and one that was abandoned still open look identical to it.
+That is exactly the difference the handover path turns on: releasing a pooled
+connection on the loop that owns it, rather than walking away from it. Hence
+``live_connections`` and :meth:`MockCore.live_settles_at`, which count opens
+AND closes, and which a test uses to say "one socket is still open, not two".
 """
 
 from __future__ import annotations
 
 import json
 import threading
+import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -116,6 +125,7 @@ class MockCore:
     def __init__(self) -> None:
         self.requests: list[RecordedRequest] = []
         self.connections = 0
+        self.live_connections = 0
         self.problems: list[str] = []
         self._queue: list[QueuedResponse] = []
         self._lock = threading.Lock()
@@ -133,7 +143,15 @@ class MockCore:
             def setup(self) -> None:  # one call per TCP connection
                 with core._lock:
                     core.connections += 1
+                    core.live_connections += 1
                 super().setup()
+
+            def finish(self) -> None:  # one call per TCP connection, on the way out
+                try:
+                    super().finish()
+                finally:
+                    with core._lock:
+                        core.live_connections -= 1
 
             def do_GET(self) -> None:
                 core._answer(self)
@@ -180,6 +198,37 @@ class MockCore:
         """Queued responses nobody asked for. A drained queue is part of a pass."""
         with self._lock:
             return len(self._queue)
+
+    def live_settles_at(self, expected: int, timeout: float = 2.0) -> int:
+        """Wait for the number of OPEN connections to reach ``expected``.
+
+        ``connections`` counts opens and never goes down, so it cannot tell a
+        socket that was closed from one that was abandoned still open, which is
+        the difference between releasing a pooled connection on its own loop
+        and walking away from it. This can: a handler thread decrements on the
+        way out of its connection.
+
+        The wait is why this is a method and not an attribute. A handler learns
+        its peer is gone when its next read comes back empty, which is a moment
+        after the client let the socket go, so a bare read races the scheduler.
+        Returns the count actually observed, so a failing assertion reports the
+        real number rather than a timeout.
+
+        **The default timeout has to stay well under ``Handler.timeout``**,
+        which is 5s. A handler whose peer went quiet gives up on its own after
+        that and runs ``finish()``, so an abandoned socket eventually stops
+        being counted as live no matter what the client did. Wait that long and
+        this method reports a tidy number the client never earned, and the
+        assertion that leaned on it is decorative. Two seconds against five is
+        the margin, and the real thing being measured takes milliseconds.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                live = self.live_connections
+            if live == expected or time.monotonic() >= deadline:
+                return live
+            time.sleep(0.01)
 
     def stop(self) -> None:
         self._server.shutdown()
