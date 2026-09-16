@@ -44,6 +44,36 @@ keyword argument is a MINOR, even pre-1.0.
   (`tests/keepalive_server.py`), and the regression test does three calls on
   one client, which fails against 0.2.0 and passes here.
 
+- **A `MnemoClient` shared between threads no longer raises at random.** One
+  event loop can be driven by one thread at a time, so a second thread calling
+  into the same client got `RuntimeError: This event loop is already running`
+  instead of its answer. It also depended on where the *first* call came from:
+  a client first used from inside a running loop lives on a worker thread of
+  its own and was never affected, so the same code worked in a notebook and
+  failed in a script. Calls on a shared client are serialised now. That makes
+  sharing safe rather than fast, because the calls queue; for throughput give
+  each thread its own client, or use `AsyncMnemoClient`. A call that fails on
+  the way in no longer leaves its coroutine un-awaited either, which used to
+  print `coroutine ... was never awaited` on top of the real error, from an
+  unrelated line.
+
+- **An ordinary reference cycle no longer prints a traceback.** A `__del__`
+  added earlier in this same unreleased work called `close()`, and closing
+  means driving the event loop, which is not allowed inside a garbage
+  collection pass: on Windows every collected cycle holding a client wrote
+  `Error on reading from the event loop self pipe` and eleven lines of
+  traceback. 0.2.0 had no `__del__` and printed nothing, so this was a
+  regression introduced inside a fix. `__del__` is gone. The `atexit` hook
+  still closes a client that was never closed, which is the case it was added
+  for, and a client that is still alive at exit is exactly the case `atexit`
+  can reach.
+
+- **A worker event loop that cannot start now says so instead of hanging.**
+  The client's loop thread was waited on with no timeout, so a failure before
+  the loop signalled ready stopped an ordinary call forever, with no exception
+  and no message. The wait is bounded at five seconds, and whatever the thread
+  died of is re-raised on the caller's thread with the SDK named.
+
 ### Added
 
 - **`api_key` is now optional on `MnemoClient` and `AsyncMnemoClient`.** When
