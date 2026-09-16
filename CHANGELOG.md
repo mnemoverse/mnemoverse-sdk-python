@@ -21,6 +21,29 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The synchronous client no longer fails on every second call.** In 0.2.0,
+  `MnemoClient` ran each call in its own event loop (`asyncio.run`) and closed
+  that loop on the way out, while the `httpx.AsyncClient` underneath was kept
+  and reused. The pooled keep-alive connection stayed bound to the loop that
+  had just been closed, so the next call raised
+  `RuntimeError: Event loop is closed`; that failure disposed of the HTTP
+  client, the call after it opened a fresh one and succeeded, and the pattern
+  repeated. Any script doing two or more calls on one `MnemoClient` hit it,
+  including the Quick Start. The client now creates **one** event loop, lazily,
+  and keeps it until `close()`, so the connection pool survives between calls.
+  `close()` and the new context-manager support (`with MnemoClient() as c:`)
+  close the HTTP client and then the loop, in that order; a client that is
+  never closed is closed at interpreter exit rather than warning about it. A
+  client used from inside a running event loop (a notebook) moves onto a
+  worker thread of its own and keeps one loop there too.
+  The test suite was green throughout the bug because it mocked httpx at the
+  transport layer: no socket, no pooled connection, nothing to strand. The
+  suite now talks to a real HTTP/1.1 keep-alive server
+  (`tests/keepalive_server.py`), and the regression test does three calls on
+  one client, which fails against 0.2.0 and passes here.
+
 ### Added
 
 - **`api_key` is now optional on `MnemoClient` and `AsyncMnemoClient`.** When
