@@ -159,6 +159,18 @@ class AsyncMnemoClient:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
+    def _forget_client(self) -> None:
+        """Drop the pooled HTTP client without closing it.
+
+        A last resort for the sync wrapper: when the event loop the pool is
+        bound to is going away and the pool could not be closed on it, keeping
+        the reference would hand the next call a connection tied to a dead
+        loop, which is exactly how 0.2.0 failed. Letting go of it costs at most
+        one idle socket, which the OS reclaims; keeping it costs every later
+        call.
+        """
+        self._client = None
+
     async def __aenter__(self) -> AsyncMnemoClient:
         return self
 
