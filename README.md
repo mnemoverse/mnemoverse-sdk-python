@@ -43,6 +43,14 @@ client.feedback(
 )
 ```
 
+### Closing the client
+
+`MnemoClient` holds a background event loop and a pooled HTTP connection, so
+close it when a script is done. Use it as a context manager,
+`with MnemoClient() as client:`, to close automatically on exit, or call
+`client.close()` directly. A client left unclosed closes itself at
+interpreter exit, which is a fallback rather than something to rely on.
+
 ## Async Client
 
 ```python
