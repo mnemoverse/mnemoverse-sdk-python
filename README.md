@@ -19,6 +19,17 @@ pip install mnemoverse
 export MNEMOVERSE_API_KEY=mk_live_YOUR_KEY
 ```
 
+**Check the key in one command.** It reads the same variable the client reads (in PowerShell, write `$env:MNEMOVERSE_API_KEY` and type `curl.exe`):
+```bash
+curl -s -H "X-Api-Key: $MNEMOVERSE_API_KEY" https://core.mnemoverse.com/api/v1/memory/stats
+```
+| The API answers (as of 2026-09-23) | What it means |
+|---|---|
+| JSON that includes `"total_atoms"` | The key works. |
+| `"message":"This API key is not recognized. Check that the whole key was copied, or create a new key at https://console.mnemoverse.com/dashboard/keys."` | The key is wrong or revoked. |
+| `"message":"This API key is the placeholder from the documentation, not a real key. Create a key at https://console.mnemoverse.com/dashboard/keys and use it instead (MNEMOVERSE_API_KEY for the MCP server, the X-Api-Key header for REST)."` | `MNEMOVERSE_API_KEY` is still set to the placeholder from the export step above. |
+| `"message":"Missing API key. Send X-Api-Key header."` | No key reached the API: the variable is empty or not set in this shell. |
+
 ```python
 from mnemoverse import MnemoClient
 
