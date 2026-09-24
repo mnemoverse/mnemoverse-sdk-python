@@ -144,6 +144,36 @@ async def test_write(client: AsyncMnemoClient, core: MockCore) -> None:
     assert result.importance == 0.85
 
 
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_write_response_parses_superseded(use_async: bool, core: MockCore) -> None:
+    """WriteResponseSchema: `superseded` is "[a]lways present; [] when
+    supersedes was omitted or empty". A write that DID supersede something
+    must parse the ids it superseded back out, through both clients."""
+    superseded_id = "550e8400-e29b-41d4-a716-446655440003"
+    core.respond(
+        path="/api/v1/memory/write",
+        json={
+            "stored": True,
+            "atom_id": ATOM_ID,
+            "importance": 0.9,
+            "reason": "correction",
+            "superseded": [superseded_id],
+        },
+    )
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            result = await async_client.write("corrected memory", supersedes=[superseded_id])
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            result = sync_client.write("corrected memory", supersedes=[superseded_id])
+
+    assert [str(sid) for sid in result.superseded] == [superseded_id]
+
+
 _SUPERSEDES_IDS = [
     UUID("550e8400-e29b-41d4-a716-446655440001"),  # a UUID object, like feedback's atom_ids
     "550e8400-e29b-41d4-a716-446655440002",  # and a plain string — both must serialize

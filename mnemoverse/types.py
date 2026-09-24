@@ -20,6 +20,10 @@ class WriteResponse(BaseModel):
     atom_id: UUID | None = None
     importance: float = 0.0
     reason: str = ""
+    # Always present on the wire per WriteResponseSchema: "[] when supersedes
+    # was omitted or empty". The default here is only a fallback for a server
+    # that predates the field.
+    superseded: list[UUID] = []
 
 
 class WriteBatchItemResult(BaseModel):
