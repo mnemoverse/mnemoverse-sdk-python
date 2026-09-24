@@ -346,12 +346,21 @@ class MnemoClient:
         domain: str = "general",
         metadata: dict[str, Any] | None = None,
         external_ref: str | None = None,
+        supersedes: list[UUID | str] | None = None,
     ) -> WriteResponse:
-        """Store a single memory atom."""
+        """Store a single memory atom.
+
+        ``supersedes`` marks this write as the correction for one or more
+        earlier atoms (own-organization ids, at most 32): the new atom is
+        stored and every listed one is marked superseded by it, in a single
+        transaction — all of it or none. Rejected by the server (422) on
+        :meth:`write_batch`, and alongside an ``xroom:`` domain.
+        """
         return self._run(
             self._async_client.write(
                 content, concepts=concepts, domain=domain,
                 metadata=metadata, external_ref=external_ref,
+                supersedes=supersedes,
             )
         )
 
