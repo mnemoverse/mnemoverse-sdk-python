@@ -4,26 +4,27 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mnemoverse"
-version = "0.3.0"
-description = "Official Python SDK for Mnemoverse — persistent memory for AI agents. Sync and async REST client."
+version = "0.3.1"
+description = "Official Python SDK for Mnemoverse — hosted AI agent memory that learns from outcomes. Sync and async REST client."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "Eduard Izgorodin", email = "helloworld@uinside.org" },
+    { name = "Eduard Izgorodin", email = "hello@mnemoverse.com" },
 ]
 keywords = [
     "ai-memory",
+    "agent-memory",
     "persistent-memory",
+    "long-term-memory",
+    "llm-memory",
     "ai-agents",
+    "feedback",
+    "mcp",
     "claude",
     "cursor",
     "chatgpt",
-    "llm-memory",
-    "hebbian-memory",
     "rest-api",
-    "long-term-memory",
-    "semantic-search",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

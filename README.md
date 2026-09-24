@@ -5,7 +5,15 @@
 
 # Mnemoverse Python SDK
 
-Persistent memory for AI agents. Not vector search — statistical learning backed by [Hebbian associations](https://arxiv.org/abs/2603.08965).
+Hosted AI agent memory that learns from outcomes, from Python. `mnemoverse` is a
+sync and async client for the Mnemoverse REST API: write memories, search them
+with a natural-language query, and report whether a recalled memory helped or
+misled, which re-ranks what comes back next. Shared rooms (beta) use the same
+calls: pass a room's `xroom:` address as `domain` to write to it or read it.
+
+The SDK does not create, invite to or join rooms. Those are tools of the
+[Mnemoverse MCP server](https://mnemoverse.com/docs/api/mcp-server), which also
+connects Claude, Cursor and ChatGPT to the same memory.
 
 ## Installation
 
@@ -43,7 +51,7 @@ result = client.write(
     concepts=["retry", "backoff", "timeout"]
 )
 
-# Query — Hebbian associations expand "timeout" → "retry", "backoff"
+# Search by natural-language query
 memories = client.read("how to handle timeouts?")
 
 # Report outcome — the system learns what works
@@ -85,7 +93,7 @@ async with AsyncMnemoClient(api_key="mk_live_YOUR_KEY") as client:
 |--------|-------------|
 | `write(content, concepts, domain, metadata)` | Store a memory |
 | `write_batch(items)` | Store up to 500 memories |
-| `read(query, top_k, domain, since, until, order_by, exclude_author)` | Semantic search — "what do I know about X" |
+| `read(query, top_k, domain, since, until, order_by, exclude_author)` | Natural-language search — "what do I know about X" |
 | `recent(domain, since, until, exclude_author, limit, cursor)` | Newest-first feed — "what happened lately" |
 | `feedback(atom_ids, outcome)` | Report success/failure |
 | `stats()` | Memory statistics |
@@ -97,7 +105,7 @@ Every method exists on both `MnemoClient` (sync) and `AsyncMnemoClient` (async).
 
 `read()` answers *what do I know about X* and ranks by relevance. `recent()`
 answers *what happened lately* and is complete within one scope by
-construction — nothing is skipped, which a semantic search cannot promise.
+construction — nothing is skipped, which a ranked search cannot promise.
 Reach for `recent()` to resume after a break or to catch up on a shared room.
 
 ```python

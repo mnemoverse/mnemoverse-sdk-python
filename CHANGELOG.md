@@ -21,6 +21,24 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-24
+
+Package metadata and README text only. No public name, signature or request
+changes, so this is a PATCH under the rule above.
+
+### Changed
+
+- **The PyPI summary and the README's opening describe the package the way the
+  rest of Mnemoverse does:** hosted AI agent memory that learns from outcomes.
+  The README now says what the SDK covers (write, search, feedback, and
+  reading and writing a shared room by its `xroom:` address) and what it does
+  not (creating, inviting to and joining rooms, which are MCP server tools).
+  The opening line and a Quick Start comment that described the retrieval
+  mechanism now say what the call does instead.
+- **Keywords.** The two that named a retrieval mechanism are dropped; `mcp`,
+  `agent-memory` and `feedback` are added.
+- **The author email is hello@mnemoverse.com.**
+
 ## [0.3.0] — 2026-09-16
 
 0.2.0's synchronous client failed on every second call. This release fixes
