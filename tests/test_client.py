@@ -612,6 +612,122 @@ async def test_recent_sends_only_the_filters_it_was_given(
     assert "cursor" not in sent
 
 
+_GRAPH_EXAMPLE_RESPONSE = {
+    "nodes": [
+        {"concept": "rotation", "degree": 1},
+        {"concept": "symmetry", "degree": 1},
+    ],
+    "edges": [
+        {
+            "source": "rotation",
+            "target": "symmetry",
+            "weight": 0.8,
+            "valence": 0.1,
+            "count": 3,
+            "updated_at": "2026-09-24T00:00:00Z",
+        }
+    ],
+    "truncated": False,
+    "min_weight_applied": 0.0,
+}
+
+
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_graph_parses_the_response(use_async: bool, core: MockCore) -> None:
+    """The example response from GraphResponseSchema, parsed through both
+    clients into GraphResponse/GraphNode/GraphEdge."""
+    core.respond(path="/api/v1/memory/graph", json=_GRAPH_EXAMPLE_RESPONSE)
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            result = await async_client.graph(["rotation", "symmetry"])
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            result = sync_client.graph(["rotation", "symmetry"])
+
+    assert [n.concept for n in result.nodes] == ["rotation", "symmetry"]
+    assert result.nodes[0].degree == 1
+    assert len(result.edges) == 1
+    edge = result.edges[0]
+    assert edge.source == "rotation"
+    assert edge.target == "symmetry"
+    assert edge.weight == 0.8
+    assert edge.valence == 0.1
+    assert edge.count == 3
+    assert edge.updated_at.year == 2026
+    assert result.truncated is False
+    assert result.min_weight_applied == 0.0
+
+
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_graph_sends_seeds_with_the_defaults(use_async: bool, core: MockCore) -> None:
+    """depth and limit carry defaults (like recent()'s limit), so they are
+    always on the wire; domain and min_weight are omitted when not given."""
+    core.respond(path="/api/v1/memory/graph", json=_GRAPH_EXAMPLE_RESPONSE)
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            await async_client.graph(["rotation", "symmetry"])
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            sync_client.graph(["rotation", "symmetry"])
+
+    sent = core.requests[-1].json()
+    assert sent == {
+        "seeds": ["rotation", "symmetry"],
+        "depth": 1,
+        "limit": 100,
+    }
+    assert "domain" not in sent
+    assert "min_weight" not in sent
+
+
+async def test_graph_sends_all_fields_when_given(client: AsyncMnemoClient, core: MockCore) -> None:
+    """domain and an explicit min_weight (including 0.0) must reach the wire —
+    0.0 is a meaningful floor, not an absent one, per the contract."""
+    core.respond(path="/api/v1/memory/graph", json=_GRAPH_EXAMPLE_RESPONSE)
+
+    await client.graph(
+        ["rotation"],
+        depth=2,
+        domain="xroom:room_01ABC",
+        min_weight=0.0,
+        limit=50,
+    )
+
+    sent = core.requests[-1].json()
+    assert sent == {
+        "seeds": ["rotation"],
+        "depth": 2,
+        "limit": 50,
+        "domain": "xroom:room_01ABC",
+        "min_weight": 0.0,
+    }
+
+
+async def test_graph_all_unknown_seeds_is_an_empty_graph_not_an_error(
+    client: AsyncMnemoClient, core: MockCore
+) -> None:
+    """An unknown seed contributes nothing: a 200 empty graph, not a 404 —
+    same "absence is not an error" contract as /memory/recent."""
+    core.respond(
+        path="/api/v1/memory/graph",
+        json={"nodes": [], "edges": [], "truncated": False, "min_weight_applied": 0.0},
+    )
+
+    result = await client.graph(["no-such-concept"])
+
+    assert result.nodes == []
+    assert result.edges == []
+    assert result.truncated is False
+
+
 async def test_read_forwards_the_temporal_params(
     client: AsyncMnemoClient, core: MockCore
 ) -> None:

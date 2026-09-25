@@ -87,6 +87,7 @@ async with AsyncMnemoClient(api_key="mk_live_YOUR_KEY") as client:
 | `write_batch(items)` | Store up to 500 memories |
 | `read(query, top_k, domain, since, until, order_by, exclude_author)` | Semantic search — "what do I know about X" |
 | `recent(domain, since, until, exclude_author, limit, cursor)` | Newest-first feed — "what happened lately" |
+| `graph(seeds, depth, domain, min_weight, limit)` | Bounded read of the concept-association graph around `seeds` |
 | `feedback(atom_ids, outcome)` | Report success/failure |
 | `stats()` | Memory statistics |
 | `health()` | API health check |

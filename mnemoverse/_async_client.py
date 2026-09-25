@@ -18,6 +18,7 @@ from mnemoverse.errors import (
 )
 from mnemoverse.types import (
     FeedbackResponse,
+    GraphResponse,
     HealthResponse,
     ReadResponse,
     RecentResponse,
@@ -298,6 +299,52 @@ class AsyncMnemoClient:
             body["cursor"] = cursor
         data = await self._request("POST", "/api/v1/memory/recent", json=body)
         return RecentResponse.model_validate(data)
+
+    async def graph(
+        self,
+        seeds: list[str],
+        *,
+        depth: int = 1,
+        domain: str | None = None,
+        min_weight: float | None = None,
+        limit: int = 100,
+    ) -> GraphResponse:
+        """Bounded read of the concept-association graph around ``seeds``.
+
+        Distinct from :meth:`read`'s ``expanded_concepts`` (names only,
+        discarded weights): this returns the actual association edges —
+        weight, valence, count, ``updated_at`` — for a caller-supplied
+        neighbourhood, never the whole organization's graph. An unknown seed
+        (or one whose edges all fall below ``min_weight``) simply contributes
+        nothing: an all-unknown ``seeds`` list is an empty graph, not an
+        error.
+
+        ``seeds``: 1-20 concept names, each at most 200 characters. ``depth``:
+        hop count from the seeds, 1-3. ``limit``: maximum edges returned,
+        1-500. ``min_weight``: drop edges below this weight, must be >= 0
+        when given.
+
+        ``domain`` follows the same rule as :meth:`read`: an ``xroom:<room_id>``
+        value resolves (after the membership/scope check) to that room's own
+        storage bucket, so the graph is read from the room's edges instead of
+        the caller's own — a real change of which org's edges get read, not a
+        filter within one org. Any other value is inert.
+
+        When ``min_weight`` is left unset and the requested ``depth`` is >= 2,
+        the server floors every hop's weight at 0.05 (including hop 0) so an
+        unfiltered multi-hop walk from a hub concept cannot fan out across the
+        whole graph before ``limit`` applies; an explicit ``min_weight``
+        (including ``0.0``) is honoured at every hop with no server override.
+        The floor actually used is echoed back as
+        :attr:`GraphResponse.min_weight_applied`.
+        """
+        body: dict[str, Any] = {"seeds": seeds, "depth": depth, "limit": limit}
+        if domain is not None:
+            body["domain"] = domain
+        if min_weight is not None:
+            body["min_weight"] = min_weight
+        data = await self._request("POST", "/api/v1/memory/graph", json=body)
+        return GraphResponse.model_validate(data)
 
     async def feedback(
         self,

@@ -127,6 +127,39 @@ class StatsResponse(BaseModel):
     avg_importance: float
 
 
+# --- Graph ---
+
+
+class GraphNode(BaseModel):
+    """One concept in the returned association graph."""
+
+    concept: str
+    degree: int
+
+
+class GraphEdge(BaseModel):
+    """One association edge, as stored in ``mnemo.hebbian_edges``.
+
+    Undirected by construction: ``source``/``target`` reflect storage order
+    (``min``/``max`` of the concept pair), not the order the concepts were
+    learned in.
+    """
+
+    source: str
+    target: str
+    weight: float
+    valence: float
+    count: int
+    updated_at: datetime
+
+
+class GraphResponse(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    truncated: bool
+    min_weight_applied: float
+
+
 # --- Health ---
 
 
