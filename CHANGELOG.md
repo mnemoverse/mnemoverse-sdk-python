@@ -21,6 +21,16 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **`supersedes` on `write()`** (sync and async). Pass a list of up to 32
+  atom ids (own organization) to mark this write as the correction for them —
+  the new atom is stored and every listed one is marked superseded by it, in
+  one transaction, matching `POST /memory/write`'s contract. Omitted from the
+  request body when not given. Rejected by the server (422) on `write_batch`
+  either way; `write_batch` takes raw dicts and forwards them unchanged, so no
+  SDK-side model needed updating there.
+
 ## [0.3.0] — 2026-09-16
 
 0.2.0's synchronous client failed on every second call. This release fixes

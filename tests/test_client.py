@@ -11,6 +11,7 @@ connection cannot see a bug about stranded connections.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 import pytest
 
@@ -141,6 +142,119 @@ async def test_write(client: AsyncMnemoClient, core: MockCore) -> None:
     assert result.stored is True
     assert str(result.atom_id) == ATOM_ID
     assert result.importance == 0.85
+
+
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_write_response_parses_superseded(use_async: bool, core: MockCore) -> None:
+    """WriteResponseSchema: `superseded` is "[a]lways present; [] when
+    supersedes was omitted or empty". A write that DID supersede something
+    must parse the ids it superseded back out, through both clients."""
+    superseded_id = "550e8400-e29b-41d4-a716-446655440003"
+    core.respond(
+        path="/api/v1/memory/write",
+        json={
+            "stored": True,
+            "atom_id": ATOM_ID,
+            "importance": 0.9,
+            "reason": "correction",
+            "superseded": [superseded_id],
+        },
+    )
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            result = await async_client.write("corrected memory", supersedes=[superseded_id])
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            result = sync_client.write("corrected memory", supersedes=[superseded_id])
+
+    assert [str(sid) for sid in result.superseded] == [superseded_id]
+
+
+_SUPERSEDES_IDS = [
+    UUID("550e8400-e29b-41d4-a716-446655440001"),  # a UUID object, like feedback's atom_ids
+    "550e8400-e29b-41d4-a716-446655440002",  # and a plain string — both must serialize
+]
+
+
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_write_sends_supersedes_when_given(use_async: bool, core: MockCore) -> None:
+    """`supersedes` marks this write as the correction for earlier atoms — the
+    request body must carry it, as a list of strings, through both the async
+    client and the sync wrapper."""
+    core.respond(
+        path="/api/v1/memory/write",
+        json={"stored": True, "atom_id": ATOM_ID, "importance": 0.9, "reason": "correction"},
+    )
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            await async_client.write("corrected memory", supersedes=_SUPERSEDES_IDS)
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            sync_client.write("corrected memory", supersedes=_SUPERSEDES_IDS)
+
+    sent = core.requests[-1].json()
+    assert sent["supersedes"] == [
+        "550e8400-e29b-41d4-a716-446655440001",
+        "550e8400-e29b-41d4-a716-446655440002",
+    ]
+
+
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_write_omits_supersedes_when_not_given(use_async: bool, core: MockCore) -> None:
+    """Absent `supersedes` must be absent from the body, not sent as null or
+    `[]` — the server treats present-but-empty/null differently from omitted
+    in some places, matching how the other optional write() fields behave."""
+    core.respond(
+        path="/api/v1/memory/write",
+        json={"stored": True, "atom_id": ATOM_ID, "importance": 0.5, "reason": "novel insight"},
+    )
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            await async_client.write("plain memory")
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            sync_client.write("plain memory")
+
+    sent = core.requests[-1].json()
+    assert "supersedes" not in sent
+
+
+async def test_write_batch_item_with_supersedes_passes_through(
+    client: AsyncMnemoClient, core: MockCore
+) -> None:
+    """`write_batch` takes raw dicts and forwards them as-is — it has no typed
+    per-item model to update. A `supersedes` key on an item must still reach
+    the wire unchanged: the server (not the SDK) is what rejects it with 422,
+    per `POST /memory/write-batch`'s contract ("not accepted on either batch
+    route")."""
+    core.respond(
+        path="/api/v1/memory/write-batch",
+        json={
+            "total_count": 1,
+            "stored_count": 0,
+            "results": [
+                {"index": 0, "stored": False, "error": "supersedes not accepted on write_batch"}
+            ],
+        },
+    )
+
+    item = {"content": "batched", "supersedes": ["550e8400-e29b-41d4-a716-446655440001"]}
+    await client.write_batch([item])
+
+    sent = core.requests[-1].json()
+    assert sent["items"][0]["supersedes"] == ["550e8400-e29b-41d4-a716-446655440001"]
 
 
 async def test_read(client: AsyncMnemoClient, core: MockCore) -> None:
