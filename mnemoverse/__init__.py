@@ -13,6 +13,9 @@ from mnemoverse.types import (
     Provenance,
     MemoryItem,
     FeedbackResponse,
+    GraphResponse,
+    GraphNode,
+    GraphEdge,
     StatsResponse,
     HealthResponse,
 )
@@ -35,6 +38,9 @@ __all__ = [
     "Provenance",
     "MemoryItem",
     "FeedbackResponse",
+    "GraphResponse",
+    "GraphNode",
+    "GraphEdge",
     "StatsResponse",
     "HealthResponse",
 ]
