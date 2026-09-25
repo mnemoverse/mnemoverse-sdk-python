@@ -13,11 +13,14 @@ from mnemoverse.types import (
     Provenance,
     MemoryItem,
     FeedbackResponse,
+    GraphResponse,
+    GraphNode,
+    GraphEdge,
     StatsResponse,
     HealthResponse,
 )
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 __all__ = [
     "MnemoClient",
@@ -35,6 +38,9 @@ __all__ = [
     "Provenance",
     "MemoryItem",
     "FeedbackResponse",
+    "GraphResponse",
+    "GraphNode",
+    "GraphEdge",
     "StatsResponse",
     "HealthResponse",
 ]

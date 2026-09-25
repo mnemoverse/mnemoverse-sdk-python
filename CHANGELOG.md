@@ -21,7 +21,9 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
-## [0.3.1] — 2026-09-24
+_Nothing yet._
+
+## [0.3.2] — 2026-09-25
 
 Package metadata and README text only. No public name, signature or request
 changes, so this is a PATCH under the rule above.
@@ -30,14 +32,38 @@ changes, so this is a PATCH under the rule above.
 
 - **The PyPI summary and the README's opening describe the package the way the
   rest of Mnemoverse does:** hosted AI agent memory that learns from outcomes.
-  The README now says what the SDK covers (write, search, feedback, and
-  reading and writing a shared room by its `xroom:` address) and what it does
-  not (creating, inviting to and joining rooms, which are MCP server tools).
+  The README now says what the SDK covers (write, search, feedback, the
+  `graph()` read, and reading and writing a shared room by its `xroom:`
+  address) and what it does not (creating, inviting to and joining rooms,
+  which are MCP server tools).
   The opening line and a Quick Start comment that described the retrieval
   mechanism now say what the call does instead.
 - **Keywords.** The two that named a retrieval mechanism are dropped; `mcp`,
   `agent-memory` and `feedback` are added.
 - **The author email is hello@mnemoverse.com.**
+
+## [0.3.1] — 2026-09-25
+
+### Added
+
+- **`graph()` / `AsyncMnemoClient.graph()`** — bounded read of the
+  concept-association graph around caller-supplied `seeds`, matching
+  `POST /memory/graph` (live since 2026-09-25). Distinct from `read()`'s
+  `expanded_concepts` (names only, discarded weights): returns the actual
+  association edges — weight, valence, count, `updated_at` — for a bounded
+  neighbourhood, never the whole organization's graph. Bounds: `seeds` 1-20
+  items (each ≤200 chars), `depth` 1-3 hops, `limit` 1-500 edges, `min_weight`
+  ≥0. `domain="xroom:<room_id>"` reads a room's own store, same as `read()`;
+  any other value is inert. New public types: `GraphResponse`, `GraphNode`,
+  `GraphEdge`.
+
+- **`supersedes` on `write()`** (sync and async). Pass a list of up to 32
+  atom ids (own organization) to mark this write as the correction for them —
+  the new atom is stored and every listed one is marked superseded by it, in
+  one transaction, matching `POST /memory/write`'s contract. Omitted from the
+  request body when not given. Rejected by the server (422) on `write_batch`
+  either way; `write_batch` takes raw dicts and forwards them unchanged, so no
+  SDK-side model needed updating there.
 
 ## [0.3.0] — 2026-09-16
 
