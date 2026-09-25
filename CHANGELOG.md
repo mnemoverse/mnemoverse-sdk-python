@@ -21,6 +21,10 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.3.1] — 2026-09-25
+
 ### Added
 
 - **`graph()` / `AsyncMnemoClient.graph()`** — bounded read of the
