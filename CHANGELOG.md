@@ -23,7 +23,7 @@ keyword argument is a MINOR, even pre-1.0.
 
 _Nothing yet._
 
-## [0.3.2] — 2026-09-25
+## [0.3.2] — 2026-10-02
 
 Package metadata and README text only. No public name, signature or request
 changes, so this is a PATCH under the rule above.
