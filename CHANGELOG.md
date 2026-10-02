@@ -23,6 +23,27 @@ keyword argument is a MINOR, even pre-1.0.
 
 _Nothing yet._
 
+## [0.4.0] — 2026-10-02
+
+Three keyword arguments the API has accepted since the revision chain
+shipped and the SDK had never learned, plus the two response fields that
+make the chain visible. New public names, so a MINOR under the rule above;
+nothing existing changes shape or wire behaviour.
+
+### Added
+
+- **`read(..., include_history=True)` and `recent(..., include_history=True)`**
+  ask for superseded revisions alongside live ones (`POST /memory/read` and
+  `/memory/recent`, `include_history`). Sent only when `True`, so a request
+  against an older core is byte-identical to before.
+- **`read(..., fingerprint=...)` and `write(..., fingerprint=...)`**: an exact
+  episodic match on a fingerprint given at write time (at most 512
+  characters); `ReadResponse.episodic_hit` says whether it hit.
+- **`MemoryItem.supersedes` / `.superseded_by` and `RecentItem.supersedes` /
+  `.superseded_by`**: the revision chain as the server reports it. Both are
+  omitted on the wire when they do not apply, so they default to `[]` and
+  `None`; a present `superseded_by` means the item is history.
+
 ## [0.3.2] — 2026-10-02
 
 Package metadata and README text only. No public name, signature or request

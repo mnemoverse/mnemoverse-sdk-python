@@ -348,6 +348,7 @@ class MnemoClient:
         metadata: dict[str, Any] | None = None,
         external_ref: str | None = None,
         supersedes: list[UUID | str] | None = None,
+        fingerprint: str | None = None,
     ) -> WriteResponse:
         """Store a single memory atom.
 
@@ -356,12 +357,14 @@ class MnemoClient:
         stored and every listed one is marked superseded by it, in a single
         transaction — all of it or none. Rejected by the server (422) on
         :meth:`write_batch`, and alongside an ``xroom:`` domain.
+        ``fingerprint`` (at most 512 characters) lets a later :meth:`read` with
+        the same fingerprint find this atom by exact match.
         """
         return self._run(
             self._async_client.write(
                 content, concepts=concepts, domain=domain,
                 metadata=metadata, external_ref=external_ref,
-                supersedes=supersedes,
+                supersedes=supersedes, fingerprint=fingerprint,
             )
         )
 
@@ -382,8 +385,14 @@ class MnemoClient:
         until: datetime | str | None = None,
         order_by: str | None = None,
         exclude_author: str | None = None,
+        include_history: bool = False,
+        fingerprint: str | None = None,
     ) -> ReadResponse:
         """Query memory with semantic search + Hebbian expansion.
+
+        ``include_history=True`` returns superseded revisions alongside live
+        ones (each carries ``superseded_by``); ``fingerprint`` asks for an exact
+        episodic match on a fingerprint given at write time.
 
         ``since`` / ``until`` bound the result by creation time, inclusive at
         both ends. ``order_by="recency"`` re-sorts the matched set newest-first
@@ -402,6 +411,7 @@ class MnemoClient:
                 concepts=concepts,
                 since=since, until=until,
                 order_by=order_by, exclude_author=exclude_author,
+                include_history=include_history, fingerprint=fingerprint,
             )
         )
 
@@ -414,18 +424,21 @@ class MnemoClient:
         exclude_author: str | None = None,
         limit: int = 20,
         cursor: str | None = None,
+        include_history: bool = False,
     ) -> RecentResponse:
         """List the newest entries first — no query, complete by construction.
 
         The temporal complement of :meth:`read`: nothing is ranked away, so use
         this when you need to be sure you are seeing everything. Paged by
         ``next_cursor``, which continues the listing with no skips and no
-        duplicates even while writes are landing.
+        duplicates even while writes are landing. ``include_history=True``
+        includes superseded revisions, each carrying ``superseded_by``.
         """
         return self._run(
             self._async_client.recent(
                 domain=domain, since=since, until=until,
                 exclude_author=exclude_author, limit=limit, cursor=cursor,
+                include_history=include_history,
             )
         )
 

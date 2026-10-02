@@ -931,3 +931,178 @@ async def test_enriched_validation_summary_is_not_duplicated(
         await client.write("x" * 10_001)
 
     assert str(exc_info.value) == summary
+
+
+# --- 0.4.0: the revision chain and the episodic fingerprint, on the wire ---
+
+_READ_EMPTY = {
+    "items": [],
+    "episodic_hit": False,
+    "query_concepts": [],
+    "expanded_concepts": [],
+    "search_time_ms": 1.0,
+}
+
+
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_read_sends_include_history_and_fingerprint_when_given(
+    use_async: bool, core: MockCore
+) -> None:
+    """The API has accepted both since the revision chain shipped; a Python
+    caller could reach neither. Both clients must put them on the wire."""
+    core.respond(path="/api/v1/memory/read", json=_READ_EMPTY)
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            await async_client.read("x", include_history=True, fingerprint="task:abc")
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            sync_client.read("x", include_history=True, fingerprint="task:abc")
+
+    sent = core.requests[-1].json()
+    assert sent["include_history"] is True
+    assert sent["fingerprint"] == "task:abc"
+
+
+async def test_read_omits_include_history_and_fingerprint_by_default(
+    client: AsyncMnemoClient, core: MockCore
+) -> None:
+    """A request from a caller that asked for neither must be byte-identical to
+    before 0.4.0: the server ignores unknown read fields rather than rejecting
+    them, so an older core would not complain, but the body must not grow."""
+    core.respond(path="/api/v1/memory/read", json=_READ_EMPTY)
+
+    await client.read("x")
+
+    sent = core.requests[-1].json()
+    assert "include_history" not in sent
+    assert "fingerprint" not in sent
+
+
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_recent_sends_include_history_only_when_true(
+    use_async: bool, core: MockCore
+) -> None:
+    core.respond(path="/api/v1/memory/recent", json={"items": [], "next_cursor": None})
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            await async_client.recent(include_history=True)
+            await async_client.recent()
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            sync_client.recent(include_history=True)
+            sync_client.recent()
+
+    assert core.requests[-2].json()["include_history"] is True
+    assert "include_history" not in core.requests[-1].json()
+
+
+@pytest.mark.parametrize("use_async", [True, False])
+async def test_write_sends_fingerprint_when_given_and_omits_it_otherwise(
+    use_async: bool, core: MockCore
+) -> None:
+    core.respond(
+        path="/api/v1/memory/write",
+        json={"stored": True, "atom_id": ATOM_ID, "importance": 0.5, "reason": "novel insight"},
+    )
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            await async_client.write("m", fingerprint="task:abc")
+            await async_client.write("m")
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            sync_client.write("m", fingerprint="task:abc")
+            sync_client.write("m")
+
+    assert core.requests[-2].json()["fingerprint"] == "task:abc"
+    assert "fingerprint" not in core.requests[-1].json()
+
+
+_HISTORY_ITEM = {
+    "atom_id": "550e8400-e29b-41d4-a716-446655440001",
+    "content": "old",
+    "relevance": 0.8,
+    "similarity": 0.8,
+    "valence": 0.0,
+    "importance": 0.5,
+    "source": "semantic",
+    "concepts": [],
+    "domain": "general",
+    "superseded_by": "550e8400-e29b-41d4-a716-446655440002",
+}
+_TIP_ITEM = {
+    "atom_id": "550e8400-e29b-41d4-a716-446655440002",
+    "content": "new",
+    "relevance": 0.9,
+    "similarity": 0.9,
+    "valence": 0.0,
+    "importance": 0.5,
+    "source": "semantic",
+    "concepts": [],
+    "domain": "general",
+    "supersedes": ["550e8400-e29b-41d4-a716-446655440001"],
+}
+
+
+async def test_read_items_carry_the_revision_chain(
+    client: AsyncMnemoClient, core: MockCore
+) -> None:
+    """`supersedes` and `superseded_by` are omitted on the wire when they do not
+    apply, so an item that replaced nothing parses with an empty list and the
+    live tip parses with `superseded_by` None; a present `superseded_by` is
+    what marks an item as history."""
+    core.respond(
+        path="/api/v1/memory/read",
+        json={**_READ_EMPTY, "items": [_TIP_ITEM, _HISTORY_ITEM]},
+    )
+
+    result = await client.read("x", include_history=True)
+
+    tip, old = result.items
+    assert tip.superseded_by is None
+    assert [str(i) for i in tip.supersedes] == ["550e8400-e29b-41d4-a716-446655440001"]
+    assert str(old.superseded_by) == "550e8400-e29b-41d4-a716-446655440002"
+    assert old.supersedes == []
+
+
+async def test_recent_items_carry_the_revision_chain(
+    client: AsyncMnemoClient, core: MockCore
+) -> None:
+    core.respond(
+        path="/api/v1/memory/recent",
+        json={
+            "items": [
+                {
+                    "atom_id": "550e8400-e29b-41d4-a716-446655440001",
+                    "content": "old",
+                    "domain": "general",
+                    "created_at": "2026-09-01T00:00:00Z",
+                    "superseded_by": "550e8400-e29b-41d4-a716-446655440002",
+                },
+                {
+                    "atom_id": "550e8400-e29b-41d4-a716-446655440002",
+                    "content": "new",
+                    "domain": "general",
+                    "created_at": "2026-09-02T00:00:00Z",
+                },
+            ],
+            "next_cursor": None,
+        },
+    )
+
+    result = await client.recent(include_history=True)
+
+    old, tip = result.items
+    assert str(old.superseded_by) == "550e8400-e29b-41d4-a716-446655440002"
+    assert tip.superseded_by is None and tip.supersedes == []
