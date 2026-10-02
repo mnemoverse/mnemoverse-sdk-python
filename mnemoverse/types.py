@@ -73,6 +73,12 @@ class MemoryItem(BaseModel):
     # timestamp and no author even when the API sent both.
     created_at: datetime | None = None
     provenance: Provenance | None = None
+    # Revision chain, reported as a fact of the data regardless of server
+    # settings. Both are OMITTED on the wire when they do not apply: an item
+    # that replaced nothing has no ``supersedes``; the live tip has no
+    # ``superseded_by``. Present ``superseded_by`` means the item is history.
+    supersedes: list[UUID] = []
+    superseded_by: UUID | None = None
 
 
 class RecentItem(BaseModel):
@@ -88,6 +94,8 @@ class RecentItem(BaseModel):
     created_at: datetime
     concepts: list[str] = []
     provenance: Provenance | None = None
+    supersedes: list[UUID] = []
+    superseded_by: UUID | None = None
 
 
 class RecentResponse(BaseModel):

@@ -189,6 +189,7 @@ class AsyncMnemoClient:
         metadata: dict[str, Any] | None = None,
         external_ref: str | None = None,
         supersedes: list[UUID | str] | None = None,
+        fingerprint: str | None = None,
     ) -> WriteResponse:
         """Store a single memory atom.
 
@@ -197,6 +198,9 @@ class AsyncMnemoClient:
         stored and every listed one is marked superseded by it, in a single
         transaction — all of it or none. Rejected by the server (422) on
         :meth:`write_batch`, and alongside an ``xroom:`` domain.
+        ``fingerprint`` (at most 512 characters, a task hash for example) lets a
+        later :meth:`read` with the same fingerprint find this atom by exact
+        match instead of by similarity.
         """
         body: dict[str, Any] = {"content": content, "domain": domain}
         if concepts:
@@ -207,6 +211,8 @@ class AsyncMnemoClient:
             body["external_ref"] = external_ref
         if supersedes:
             body["supersedes"] = [str(sid) for sid in supersedes]
+        if fingerprint is not None:
+            body["fingerprint"] = fingerprint
         data = await self._request("POST", "/api/v1/memory/write", json=body)
         return WriteResponse.model_validate(data)
 
@@ -231,8 +237,18 @@ class AsyncMnemoClient:
         until: datetime | str | None = None,
         order_by: str | None = None,
         exclude_author: str | None = None,
+        include_history: bool = False,
+        fingerprint: str | None = None,
     ) -> ReadResponse:
         """Query memory with semantic search + Hebbian expansion.
+
+        ``include_history=True`` asks for superseded revisions alongside live
+        ones: each carries ``superseded_by``, and any item that replaced
+        something carries ``supersedes``. History competes under the same
+        ranking and ``top_k`` as everything else, so a read may return part of
+        a chain; for the whole chain, follow ``superseded_by`` by id.
+        ``fingerprint`` asks for an exact episodic match on a fingerprint given
+        at write time (``episodic_hit`` on the response says whether it hit).
 
         ``since`` / ``until`` bound the result by creation time, inclusive at
         both ends; naive datetimes are read as UTC. ``order_by="recency"``
@@ -262,6 +278,10 @@ class AsyncMnemoClient:
             body["order_by"] = order_by
         if exclude_author is not None:
             body["exclude_author"] = exclude_author
+        if include_history:
+            body["include_history"] = True
+        if fingerprint is not None:
+            body["fingerprint"] = fingerprint
         data = await self._request("POST", "/api/v1/memory/read", json=body)
         return ReadResponse.model_validate(data)
 
@@ -274,8 +294,12 @@ class AsyncMnemoClient:
         exclude_author: str | None = None,
         limit: int = 20,
         cursor: str | None = None,
+        include_history: bool = False,
     ) -> RecentResponse:
         """List the newest entries first — no query, complete by construction.
+
+        ``include_history=True`` includes superseded revisions in the feed,
+        each carrying ``superseded_by``; by default the feed lists live tips.
 
         The temporal complement of :meth:`read`. Nothing is ranked away, so this
         is what to use when you need to be sure you are seeing everything:
@@ -297,6 +321,8 @@ class AsyncMnemoClient:
             body["exclude_author"] = exclude_author
         if cursor:
             body["cursor"] = cursor
+        if include_history:
+            body["include_history"] = True
         data = await self._request("POST", "/api/v1/memory/recent", json=body)
         return RecentResponse.model_validate(data)
 
