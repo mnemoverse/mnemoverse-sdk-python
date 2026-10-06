@@ -21,7 +21,14 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **`diversity` on `read()`** (0 to 1, default 0), sync and async, passed to
+  core's `POST /memory/read` (core#656). Above 0, a match that is a near-copy
+  of one already picked gives its slot to the next distinct memory (maximal
+  marginal relevance); it changes which memories come back, not their scores,
+  and applies only when there are more matches than `top_k` and `top_k` is
+  below 200. At 0 the request body is unchanged.
 
 ## [0.4.0] — 2026-10-02
 

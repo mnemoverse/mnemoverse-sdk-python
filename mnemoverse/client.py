@@ -387,12 +387,14 @@ class MnemoClient:
         exclude_author: str | None = None,
         include_history: bool = False,
         fingerprint: str | None = None,
+        diversity: float = 0.0,
     ) -> ReadResponse:
         """Query memory with semantic search + Hebbian expansion.
 
         ``include_history=True`` returns superseded revisions alongside live
         ones (each carries ``superseded_by``); ``fingerprint`` asks for an exact
-        episodic match on a fingerprint given at write time.
+        episodic match on a fingerprint given at write time. ``diversity`` (0 to 1)
+        keeps near-copies from taking several slots.
 
         ``since`` / ``until`` bound the result by creation time, inclusive at
         both ends. ``order_by="recency"`` re-sorts the matched set newest-first
@@ -412,6 +414,7 @@ class MnemoClient:
                 since=since, until=until,
                 order_by=order_by, exclude_author=exclude_author,
                 include_history=include_history, fingerprint=fingerprint,
+                diversity=diversity,
             )
         )
 
