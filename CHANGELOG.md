@@ -21,6 +21,10 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.5.0] — 2026-10-06
+
 ### Added
 
 - **`diversity` on `read()`** (0 to 1, default 0), sync and async, passed to
