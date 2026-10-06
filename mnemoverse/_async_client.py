@@ -239,6 +239,7 @@ class AsyncMnemoClient:
         exclude_author: str | None = None,
         include_history: bool = False,
         fingerprint: str | None = None,
+        diversity: float = 0.0,
     ) -> ReadResponse:
         """Query memory with semantic search + Hebbian expansion.
 
@@ -249,6 +250,12 @@ class AsyncMnemoClient:
         a chain; for the whole chain, follow ``superseded_by`` by id.
         ``fingerprint`` asks for an exact episodic match on a fingerprint given
         at write time (``episodic_hit`` on the response says whether it hit).
+
+        ``diversity`` (0 to 1, default 0) keeps near-copies from taking several
+        slots: above 0, a match too similar to one already picked gives its
+        slot to the next distinct memory (maximal marginal relevance). It
+        changes which memories come back, not their scores, and applies only
+        when there are more matches than ``top_k`` and ``top_k`` is below 200.
 
         ``since`` / ``until`` bound the result by creation time, inclusive at
         both ends; naive datetimes are read as UTC. ``order_by="recency"``
@@ -282,6 +289,8 @@ class AsyncMnemoClient:
             body["include_history"] = True
         if fingerprint is not None:
             body["fingerprint"] = fingerprint
+        if diversity:
+            body["diversity"] = diversity
         data = await self._request("POST", "/api/v1/memory/read", json=body)
         return ReadResponse.model_validate(data)
 

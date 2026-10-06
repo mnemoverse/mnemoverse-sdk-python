@@ -945,6 +945,35 @@ _READ_EMPTY = {
 
 
 @pytest.mark.parametrize("use_async", [True, False])
+async def test_read_sends_diversity_when_above_zero(use_async: bool, core: MockCore) -> None:
+    """core#656 accepts ``diversity`` on POST /memory/read; both clients must
+    put it on the wire when the caller asks for it."""
+    core.respond(path="/api/v1/memory/read", json=_READ_EMPTY)
+
+    if use_async:
+        async_client = AsyncMnemoClient(base_url=core.url, api_key="mk_test", max_retries=0)
+        try:
+            await async_client.read("x", diversity=0.3)
+        finally:
+            await async_client.close()
+    else:
+        with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+            sync_client.read("x", diversity=0.3)
+
+    assert core.requests[-1].json()["diversity"] == 0.3
+
+
+async def test_read_omits_diversity_at_zero(client: AsyncMnemoClient, core: MockCore) -> None:
+    """0 is the engine's own default, so the body stays byte-identical to what
+    an older core accepts."""
+    core.respond(path="/api/v1/memory/read", json=_READ_EMPTY)
+
+    await client.read("x", diversity=0.0)
+
+    assert "diversity" not in core.requests[-1].json()
+
+
+@pytest.mark.parametrize("use_async", [True, False])
 async def test_read_sends_include_history_and_fingerprint_when_given(
     use_async: bool, core: MockCore
 ) -> None:
