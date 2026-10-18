@@ -5,16 +5,21 @@
 
 # Mnemoverse Python SDK
 
-Hosted AI agent memory that learns from outcomes, from Python. `mnemoverse` is a
-sync and async client for the Mnemoverse REST API: write memories, search them
-with a natural-language query, and report whether a recalled memory helped or
-misled, which re-ranks what comes back next. `graph()` reads the association
-edges around given concepts. Shared rooms (beta) use the same calls: pass a
-room's `xroom:` address as `domain` to write to it or read it.
+Hosted long-term memory for AI agents, from Python. Two calls cover the
+basics: `client.write()` saves a memory, and `client.read()` finds it again by
+a natural-language query. Pass `domain="user:<id>"` to both to keep each
+user's memories apart. Rating a recalled memory as helpful or misleading
+re-ranks what comes back next (`client.feedback()`).
 
-The SDK does not create, invite to or join rooms. Those are tools of the
-[Mnemoverse MCP server](https://mnemoverse.com/docs/api/mcp-server), which also
-connects Claude, Cursor and ChatGPT to the same memory.
+Free plan, no credit card: 1,000 queries a day (reads, writes and feedback
+combined), 10,000 atoms of storage, 60 requests a minute. Plans and limits:
+https://mnemoverse.com/pricing
+
+Shared rooms (beta) use the same calls: pass a room's `xroom:` address as
+`domain`. The SDK does not create, invite to or join them; those are tools of
+the [Mnemoverse MCP server](https://mnemoverse.com/docs/api/mcp-server), which
+connects Claude Code, Cursor, VS Code and ChatGPT to the same memory with an
+OAuth sign-in or an API key.
 
 ## Installation
 
@@ -43,7 +48,7 @@ curl -s -H "X-Api-Key: $MNEMOVERSE_API_KEY" https://core.mnemoverse.com/api/v1/m
 from mnemoverse import MnemoClient
 
 client = MnemoClient()
-# or pass it explicitly — an explicit api_key always wins over the environment:
+# or pass it explicitly; an explicit api_key always wins over the environment:
 # client = MnemoClient(api_key="mk_live_YOUR_KEY")
 
 # Store a memory
@@ -55,7 +60,7 @@ result = client.write(
 # Search by natural-language query
 memories = client.read("how to handle timeouts?")
 
-# Report outcome — the system learns what works
+# Rating a recalled memory as helpful (1.0) or misleading (-1.0) re-ranks what comes back next
 client.feedback(
     atom_ids=[item.atom_id for item in memories.items],
     outcome=1.0,
@@ -83,10 +88,10 @@ async with AsyncMnemoClient(api_key="mk_live_YOUR_KEY") as client:
 
 ## Features
 
-- **Circuit breaker** — 5 failures → open → 30s half-open → probe
-- **Retry with backoff** — 3 attempts, rate-limit-aware
-- **Sync + async** — `MnemoClient` for scripts, `AsyncMnemoClient` for FastAPI
-- **Type-safe** — Pydantic models, full type hints
+- **Circuit breaker**: 5 failures → open → 30s half-open → probe
+- **Retry with backoff**: 3 attempts, rate-limit-aware
+- **Sync + async**: `MnemoClient` for scripts, `AsyncMnemoClient` for FastAPI
+- **Type-safe**: Pydantic models, full type hints
 
 ## Methods
 
@@ -94,8 +99,8 @@ async with AsyncMnemoClient(api_key="mk_live_YOUR_KEY") as client:
 |--------|-------------|
 | `write(content, concepts, domain, metadata, external_ref, supersedes, fingerprint)` | Store a memory |
 | `write_batch(items)` | Store up to 500 memories |
-| `read(query, top_k, domain, since, until, order_by, exclude_author, include_history, fingerprint)` | Natural-language search — "what do I know about X" |
-| `recent(domain, since, until, exclude_author, limit, cursor, include_history)` | Newest-first feed — "what happened lately" |
+| `read(query, top_k, domain, since, until, order_by, exclude_author, include_history, fingerprint)` | Natural-language search: "what do I know about X" |
+| `recent(domain, since, until, exclude_author, limit, cursor, include_history)` | Newest-first feed: "what happened lately" |
 | `graph(seeds, depth, domain, min_weight, limit)` | Bounded read of the concept-association graph around `seeds` |
 | `feedback(atom_ids, outcome)` | Report success/failure |
 | `stats()` | Memory statistics |
@@ -107,7 +112,7 @@ Every method exists on both `MnemoClient` (sync) and `AsyncMnemoClient` (async).
 
 `read()` answers *what do I know about X* and ranks by relevance. `recent()`
 answers *what happened lately* and is complete within one scope by
-construction — nothing is skipped, which a ranked search cannot promise.
+construction; nothing is skipped, which a ranked search cannot promise.
 Reach for `recent()` to resume after a break or to catch up on a shared room.
 
 ```python

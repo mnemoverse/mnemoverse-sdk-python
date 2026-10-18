@@ -21,7 +21,19 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
-_Nothing yet._
+Package metadata and README text only. No public name, signature or request
+changes, so this ships as a PATCH under the rule above.
+
+### Changed
+
+- **The PyPI summary and the top of the README** describe the package by
+  what it does: write, read and rate recalled memories. The opening now shows
+  the two basic calls, `domain="user:<id>"` for keeping each user's memories
+  apart, and the Free plan numbers from
+  [mnemoverse.com/pricing](https://mnemoverse.com/pricing). It and the Quick
+  Start feedback comment say that rating a recalled memory as helpful or
+  misleading re-ranks what comes back next.
+- **No em dashes** in the summary or the README (nine lines).
 
 ## [0.5.0] — 2026-10-06
 
