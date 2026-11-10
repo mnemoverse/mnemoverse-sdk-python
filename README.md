@@ -15,7 +15,7 @@ Free plan, no credit card: 1,000 queries a day (reads, writes and feedback
 combined), 10,000 atoms of storage, 60 requests a minute. Plans and limits:
 https://mnemoverse.com/pricing
 
-Shared rooms (beta) use the same calls: pass a room's `xroom:` address as
+Shared rooms use the same calls: pass a room's `xroom:` address as
 `domain`. The SDK does not create, invite to or join them; those are tools of
 the [Mnemoverse MCP server](https://mnemoverse.com/docs/api/mcp-server), which
 connects Claude Code, Cursor, VS Code and ChatGPT to the same memory with an
