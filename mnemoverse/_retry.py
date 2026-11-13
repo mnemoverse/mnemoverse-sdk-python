@@ -8,7 +8,18 @@ from typing import Any
 
 
 class CircuitBreaker:
-    """Simple circuit breaker: closed → open (after N failures) → half-open (after timeout)."""
+    """Simple circuit breaker: closed → open (after N failures) → half-open (after timeout).
+
+    In half-open exactly one call, the probe, is let through, and every other
+    call is refused until the probe reports back. So the probe must always
+    report back, whatever happens to it: :meth:`on_success` when the service
+    answered (a caller error such as a 404 included), :meth:`on_failure` when
+    it failed in a way that counts against its health, and
+    :meth:`on_abandoned` when the probe ended with no verdict at all
+    (cancelled, or an exception that is not an HTTP answer). A probe that
+    reports nothing leaves the breaker half-open for good, refusing every
+    later call until the process restarts.
+    """
 
     def __init__(self, failure_threshold: int = 5, reset_timeout: float = 30.0) -> None:
         self._failure_threshold = failure_threshold
@@ -40,6 +51,18 @@ class CircuitBreaker:
         self._last_failure_time = time.monotonic()
         if self._failures >= self._failure_threshold:
             self._state = "open"
+
+    def on_abandoned(self) -> None:
+        """The probe ended without a verdict on the service: back to open.
+
+        A fresh timestamp, so the next probe goes out ``reset_timeout`` from
+        now, and no failure counted: a cancellation says nothing about the
+        service. Only a half-open breaker changes. A closed one has no probe
+        to lose, and an open one is already where this would put it.
+        """
+        if self._state == "half-open":
+            self._state = "open"
+            self._last_failure_time = time.monotonic()
 
 
 async def retry_with_backoff(

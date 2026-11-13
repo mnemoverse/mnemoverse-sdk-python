@@ -425,6 +425,11 @@ class AsyncMnemoClient:
             raise MnemoUnavailableError(
                 f"Circuit breaker open (state: {self._cb.state})"
             )
+        # can_execute() lets exactly one call out of "open", moving the breaker
+        # to "half-open" as it does, with no await in between. So a half-open
+        # breaker here means this call is that one probe, and every other call
+        # is refused until it reports back, whatever happens to it below.
+        probe = self._cb.state == "half-open"
 
         def is_retryable(e: Exception) -> bool:
             if isinstance(e, MnemoError) and e.retryable is not None:
@@ -444,12 +449,26 @@ class AsyncMnemoClient:
                 max_retries=self._max_retries,
                 retryable_check=is_retryable,
             )
-            self._cb.on_success()
-            return result
         except MnemoError as e:
             if _counts_towards_breaker(e):
                 self._cb.on_failure()
+            elif probe:
+                # A caller error (401, 403, 404, 422, a quota 429) is still an
+                # answer from the service, which is all a probe has to find
+                # out. Close the breaker; the error still goes to the caller.
+                self._cb.on_success()
             raise
+        except BaseException:
+            # No verdict on the service at all: the call was cancelled
+            # (CancelledError is a BaseException, not an Exception) or failed
+            # with something that is not an HTTP answer. A probe that ends this
+            # way puts the breaker back to open, so a later call can probe
+            # again. Re-raised unchanged.
+            if probe:
+                self._cb.on_abandoned()
+            raise
+        self._cb.on_success()
+        return result
 
     async def _single_request(
         self,
@@ -471,7 +490,11 @@ class AsyncMnemoClient:
         detail, retryable = self._extract_error(response)
 
         if response.status_code == 401 or response.status_code == 403:
-            raise MnemoAuthError(detail)
+            auth_error = MnemoAuthError(detail)
+            # One class for both, but the status is the one the server sent:
+            # a 403 (a valid key without access) is not a 401 (no valid key).
+            auth_error.status = response.status_code
+            raise auth_error
 
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After")

@@ -10,6 +10,8 @@ connection cannot see a bug about stranded connections.
 
 from __future__ import annotations
 
+import asyncio
+import socket
 from collections.abc import AsyncIterator
 from uuid import UUID
 
@@ -22,6 +24,7 @@ from mnemoverse import (
     MnemoError,
     MnemoRateLimitError,
     MnemoUnavailableError,
+    _retry,
 )
 from tests.keepalive_server import MockCore
 
@@ -335,11 +338,20 @@ async def test_health(client: AsyncMnemoClient, core: MockCore) -> None:
     assert result.database is True
 
 
-async def test_auth_error(client: AsyncMnemoClient, core: MockCore) -> None:
-    core.respond(path="/api/v1/memory/read", status=401, json={"detail": "Invalid API key"})
+@pytest.mark.parametrize("status", [401, 403])
+async def test_auth_error(status: int, client: AsyncMnemoClient, core: MockCore) -> None:
+    """401 and 403 are both MnemoAuthError, and each reports its own status.
 
-    with pytest.raises(MnemoAuthError):
+    Up to 0.5.1 a 403 (a valid key without access) came back with
+    ``status == 401``, so a caller could not tell it from a missing key.
+    """
+    core.respond(path="/api/v1/memory/read", status=status, json={"detail": "Invalid API key"})
+
+    with pytest.raises(MnemoAuthError) as exc_info:
         await client.read("test")
+
+    assert exc_info.value.status == status
+    assert exc_info.value.retryable is False
 
 
 async def test_rate_limit_error(client: AsyncMnemoClient, core: MockCore) -> None:
@@ -545,6 +557,246 @@ async def test_non_retryable_server_errors_still_open_the_circuit_breaker(
 
     # One request per call proves retryable=false still controls retries.
     assert len(core.requests) == 5
+
+
+# --- The half-open probe ---------------------------------------------------
+#
+# After 30s open, the breaker lets ONE call through (the probe) and refuses
+# every other call until the probe reports back. Up to 0.5.1 a probe reported
+# back only on success or on a failure that counts; a probe answered with a
+# 4xx, cancelled, or failing with an exception that is not an HTTP answer
+# reported nothing, and the breaker refused every call from then on, with the
+# service up, until the process restarted.
+
+_RESET_TIMEOUT = 30.0  # the client's documented "30s half-open"
+
+
+class _BreakerClock:
+    """The clock the circuit breaker reads, stepped by hand.
+
+    Replaces ``time`` in ``mnemoverse._retry`` only, not ``time.monotonic``
+    itself: the event loop schedules on the real ``time.monotonic`` and has to
+    keep doing so.
+    """
+
+    def __init__(self) -> None:
+        self._now = 1_000.0
+
+    def monotonic(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+
+@pytest.fixture
+def breaker_clock(monkeypatch: pytest.MonkeyPatch) -> _BreakerClock:
+    clock = _BreakerClock()
+    monkeypatch.setattr(_retry, "time", clock)
+    return clock
+
+
+async def _open_the_breaker(client: AsyncMnemoClient, core: MockCore) -> None:
+    """Five server errors in a row: the breaker opens, the sixth call never leaves."""
+    for _ in range(5):
+        core.respond(
+            path="/api/v1/health",
+            status=500,
+            json={"code": "INTERNAL", "message": "boom", "retryable": True},
+        )
+    for _ in range(5):
+        with pytest.raises(MnemoError):
+            await client.health()
+    with pytest.raises(MnemoUnavailableError, match="Circuit breaker open"):
+        await client.health()
+    assert len(core.requests) == 5
+
+
+@pytest.mark.parametrize(
+    ("status", "error_type"),
+    [
+        (401, MnemoAuthError),
+        (403, MnemoAuthError),
+        (404, MnemoError),
+        (422, MnemoError),
+    ],
+)
+async def test_half_open_probe_answered_with_a_client_error_closes_the_breaker(
+    status: int,
+    error_type: type[MnemoError],
+    client: AsyncMnemoClient,
+    core: MockCore,
+    breaker_clock: _BreakerClock,
+) -> None:
+    """A 4xx is an answer, and an answer is all a probe has to get.
+
+    The caller still gets the error. The breaker closes, so the next call goes
+    out. Before the fix the next call raised "Circuit breaker open (state:
+    half-open)" without reaching the wire, and so did every call after it.
+    """
+    await _open_the_breaker(client, core)
+    breaker_clock.advance(_RESET_TIMEOUT)
+    core.respond(path="/api/v1/health", status=status, json={"detail": "rejected"})
+
+    with pytest.raises(error_type):
+        await client.health()
+
+    result = await client.health()
+
+    assert result.status == "ok"
+    # Seven, not six: the call after the probe reached the wire.
+    assert len(core.requests) == 7
+
+
+def test_sync_client_recovers_when_a_half_open_probe_gets_a_client_error(
+    core: MockCore, breaker_clock: _BreakerClock
+) -> None:
+    """The same through MnemoClient, which shares the async client's breaker."""
+    for _ in range(5):
+        core.respond(
+            path="/api/v1/health",
+            status=500,
+            json={"code": "INTERNAL", "message": "boom", "retryable": True},
+        )
+    core.respond(path="/api/v1/health", status=404, json={"detail": "not here"})
+
+    with MnemoClient(base_url=core.url, api_key="mk_test", max_retries=0) as sync_client:
+        for _ in range(5):
+            with pytest.raises(MnemoError):
+                sync_client.health()
+        with pytest.raises(MnemoUnavailableError, match="Circuit breaker open"):
+            sync_client.health()
+
+        breaker_clock.advance(_RESET_TIMEOUT)
+        with pytest.raises(MnemoError) as exc_info:
+            sync_client.health()
+        assert exc_info.value.status == 404
+
+        assert sync_client.health().status == "ok"
+
+    assert len(core.requests) == 7
+
+
+async def test_half_open_probe_cancelled_puts_the_breaker_back_to_open(
+    client: AsyncMnemoClient,
+    core: MockCore,
+    breaker_clock: _BreakerClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cancelled probe returns the breaker to open, with a fresh 30s, not stuck half-open.
+
+    ``asyncio.CancelledError`` is a BaseException, so an ``except MnemoError``
+    never sees it: a probe cancelled by a caller's ``wait_for`` timeout or a
+    shutting-down task group used to leave the breaker half-open for good.
+
+    The hang is injected one level above the socket, in ``_single_request``.
+    The stand-in core answers at once, and making it hold an answer back means
+    a handler thread later writing into a socket the cancelled client has
+    already closed. The breaker's admission of the probe and the cancellation
+    are both real.
+    """
+    await _open_the_breaker(client, core)
+    breaker_clock.advance(_RESET_TIMEOUT)
+
+    in_flight = asyncio.Event()
+
+    async def never_answers(*args: object, **kwargs: object) -> None:
+        in_flight.set()
+        await asyncio.Event().wait()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(client, "_single_request", never_answers)
+        probe = asyncio.create_task(client.health())
+        await in_flight.wait()
+
+        # While the probe is out, everyone else is refused.
+        with pytest.raises(MnemoUnavailableError, match=r"state: half-open"):
+            await client.health()
+
+        probe.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await probe
+
+    # Open with a fresh timestamp: had the old one been kept, 30s would already
+    # have passed and this call would have gone out as a new probe.
+    with pytest.raises(MnemoUnavailableError, match=r"state: open"):
+        await client.health()
+    assert len(core.requests) == 5
+
+    breaker_clock.advance(_RESET_TIMEOUT)
+    result = await client.health()
+
+    assert result.status == "ok"
+    assert len(core.requests) == 6
+
+
+async def test_half_open_probe_answered_with_a_server_error_reopens_the_breaker(
+    client: AsyncMnemoClient, core: MockCore, breaker_clock: _BreakerClock
+) -> None:
+    """A probe that gets a 5xx opens the breaker again, for another 30s.
+
+    Green before the fix as well as after: a regression pin for the behaviour
+    the fix must keep.
+    """
+    await _open_the_breaker(client, core)
+    breaker_clock.advance(_RESET_TIMEOUT)
+    core.respond(
+        path="/api/v1/health",
+        status=503,
+        json={"code": "UNAVAILABLE", "message": "still down", "retryable": True},
+    )
+
+    with pytest.raises(MnemoError) as exc_info:
+        await client.health()
+    assert exc_info.value.status == 503
+
+    with pytest.raises(MnemoUnavailableError, match=r"state: open"):
+        await client.health()
+    assert len(core.requests) == 6
+
+
+async def test_half_open_probe_that_cannot_connect_reopens_the_breaker(
+    breaker_clock: _BreakerClock,
+) -> None:
+    """The transport side of the same pin: a refused connection counts too.
+
+    Green before the fix as well as after. Nothing listens on the port, so
+    every connection is refused at once and no stand-in server is needed.
+    """
+    with socket.socket() as placeholder:
+        placeholder.bind(("127.0.0.1", 0))
+        port = placeholder.getsockname()[1]
+    unreachable = AsyncMnemoClient(
+        api_key="mk_test_abc123",
+        base_url=f"http://127.0.0.1:{port}",
+        max_retries=0,
+    )
+
+    try:
+        for _ in range(5):
+            with pytest.raises(MnemoUnavailableError, match="Connection error"):
+                await unreachable.health()
+
+        breaker_clock.advance(_RESET_TIMEOUT)
+        with pytest.raises(MnemoUnavailableError, match="Connection error"):
+            await unreachable.health()
+
+        with pytest.raises(MnemoUnavailableError, match=r"Circuit breaker open \(state: open\)"):
+            await unreachable.health()
+    finally:
+        await unreachable.close()
+
+
+async def test_half_open_probe_success_closes_the_breaker(
+    client: AsyncMnemoClient, core: MockCore, breaker_clock: _BreakerClock
+) -> None:
+    """A probe that succeeds closes the breaker. Green before the fix as well."""
+    await _open_the_breaker(client, core)
+    breaker_clock.advance(_RESET_TIMEOUT)
+
+    assert (await client.health()).status == "ok"
+    assert (await client.health()).status == "ok"
+    assert len(core.requests) == 7
 
 
 async def test_recent_returns_the_feed_and_its_cursor(
