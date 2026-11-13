@@ -21,6 +21,8 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-11-13
+
 Defect fixes only: no public name, signature or request body changes, so a
 PATCH under the rule above.
 

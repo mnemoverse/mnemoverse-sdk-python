@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mnemoverse"
-version = "0.5.1"
+version = "0.5.2"
 description = "Python SDK for Mnemoverse, hosted long-term memory for AI agents: write, read and rate recalled memories. Sync and async REST client."
 readme = "README.md"
 license = "MIT"
