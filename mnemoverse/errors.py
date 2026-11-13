@@ -21,7 +21,10 @@ class MnemoError(Exception):
 
 
 class MnemoAuthError(MnemoError):
-    """Invalid or missing API key (401/403)."""
+    """Invalid or missing API key (401), or a key without access (403).
+
+    ``status`` is the code the server sent. Constructed directly, it is 401.
+    """
 
     def __init__(self, message: str = "Invalid or missing API key") -> None:
         super().__init__(message, status=401, retryable=False)

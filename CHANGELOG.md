@@ -21,6 +21,31 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+Defect fixes only: no public name, signature or request body changes, so a
+PATCH under the rule above.
+
+### Fixed
+
+- **The circuit breaker no longer gets stuck half-open.** After 30 seconds
+  open, the breaker lets one call through as a probe and refuses every other
+  call until the probe reports back. The probe reported back only when it
+  succeeded or failed in a way that counts against the service (a 5xx, a
+  timeout, a refused connection). A probe answered with a caller error (401,
+  403, 404, 422, a quota 429), cancelled (`asyncio.CancelledError`, from
+  `asyncio.wait_for` or a task group shutting down), or failing with an
+  exception that is not an HTTP answer reported nothing. From then on every
+  call on that client raised
+  `MnemoUnavailableError: Circuit breaker open (state: half-open)` without
+  reaching the network, even with the service up, until the process
+  restarted. A probe that gets an answer from the service now closes the
+  breaker, and the caller still gets the error. A probe that ends with no
+  answer puts the breaker back to open for another 30 seconds, without
+  counting as a failure. Nothing changes while the breaker is closed. Fixed
+  for both clients: `MnemoClient` runs on `AsyncMnemoClient`'s breaker.
+- **A 403 reports `status == 403`.** It is still raised as `MnemoAuthError`,
+  but carried `status == 401`, so a key without access could not be told
+  apart from a missing or invalid key. A 401 is unchanged.
+
 ## [0.5.1] — 2026-11-13
 
 Package metadata and README text only. No public name, signature or request
