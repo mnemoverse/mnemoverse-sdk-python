@@ -21,6 +21,8 @@ keyword argument is a MINOR, even pre-1.0.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-11-13
+
 Package metadata and README text only. No public name, signature or request
 changes, so this ships as a PATCH under the rule above.
 
@@ -34,6 +36,8 @@ changes, so this ships as a PATCH under the rule above.
   Start feedback comment say that rating a recalled memory as helpful or
   misleading re-ranks what comes back next.
 - **No em dashes** in the summary or the README (nine lines).
+- **Shared rooms are no longer described as beta** in the README (owner
+  decision of 2026-11-10). (#25)
 
 ## [0.5.0] — 2026-10-06
 
